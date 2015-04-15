@@ -20,8 +20,6 @@ var Texture2D = glu.Texture2D;
 var Vec2 = geom.Vec2;
 var Vec3 = geom.Vec3;
 var DisplacedMatCap = require('./materials/DisplacedMatCap');
-var RenderTarget = glu.RenderTarget;
-var ScreenImage = glu.ScreenImage;
 var Fluid = require('./fluid/fluid');
 
 sys.Window.create({
@@ -102,55 +100,18 @@ sys.Window.create({
             }
         }.bind(this));
 
-        var n = 512;
-        var T = 0;
-        var gl = this.gl;
-        var pixels = [];
-
-        for(var i = 0; i<n; i++) {
-            for(var j = 0; j<n; j++){
-                T = 0; // background color
-                if (i>200 && i<300){
-                    if (j>100 && j<240) T=1; // red
-                    else if (j>260 && j<400) T= -1; // blue
-                }
-                pixels.push( 0, 0, T, 0 );
-            }
-        }
-
-        var b = new ArrayBuffer(n * n * 32);
-        var pixelsData = new Float32Array(b);
-
-        for(var i=0; i<pixels.length; i++)
-            pixelsData[i] = pixels[i];
-
-        var texture0 = Texture2D.create(n, n, { bpp: 32, nearest: true });
-        texture0.bind();
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, n, n, 0, gl.RGBA, gl.FLOAT, pixelsData);
-
-        var texture1 = Texture2D.create(n, n, { bpp: 32, nearest: true });
-        texture1.bind();
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, n, n, 0, gl.RGBA, gl.FLOAT, pixelsData);
-
-        texture0.name = 'texture0';
-        texture1.name = 'texture1';
-
-        this.fbo0 = new RenderTarget(n, n, { color: texture0 });
-        this.fbo1 = new RenderTarget(n, n, { color: texture1 });
-        this.screenImage = new ScreenImage(null, 0, 0, n, n, n, n);
     },
     draw: function() {
         try {
             //disable depth test
             glu.enableDepthReadAndWrite(false, false);
-            glu.viewport(0, 0, this.fbo0.width, this.fbo0.height);
+            glu.viewport(0, 0, this.fluid.width, this.fluid.height);
 
-            this.fluid.iterate(this.screenImage, this.fbo0, this.fbo1);
+            var fluidTexture = this.fluid.iterate();
             glu.viewport(0, 0, this.width, this.height);
             glu.clearColorAndDepth(Color.Black);
 
-            this.screenImage.draw(this.fbo0.getColorAttachment(), this.fluid.show);
-
+            this.fluid.draw();
             glu.clearDepth();
             glu.enableDepthReadAndWrite(true);
 
@@ -163,7 +124,7 @@ sys.Window.create({
             this.mesh.material.uniforms.
                         time                = sys.Time.seconds;
             this.mesh.material.uniforms.
-                        displacementMap     = this.fbo0.getColorAttachment(0);
+                        displacementMap     = fluidTexture;
 
             this.meshWireframe.material.uniforms.
                         showNormals         = this.showNormals;
@@ -174,7 +135,7 @@ sys.Window.create({
             this.meshWireframe.material.uniforms.
                         time                = sys.Time.seconds;
             this.meshWireframe.material.uniforms.
-                        displacementMap     = this.fbo0.getColorAttachment(0);
+                        displacementMap     = fluidTexture;
 
 
             glu.enableDepthReadAndWrite(true, true);
