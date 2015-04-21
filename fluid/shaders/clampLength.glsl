@@ -20,16 +20,24 @@ void main() {
 
 #endif
 
-
 #ifdef FRAG
 
-uniform sampler2D image;
+uniform sampler2D Backbuffer;
+uniform float MaxLength;
+uniform float ClampForce;
 varying vec2 tc;
 
-void main() {
-  float T = texture2D(image, tc).b;
-  if(T > 0.0) gl_FragColor = vec4(T, 0.0, 0.0, 1.0);
-  else gl_FragColor = vec4(0.0, 0.0, -T, 1.);
+void main(){
+
+  vec4 color = texture2D(Backbuffer, tc);
+
+  float l = length(color.xyz);
+  if (l > MaxLength) {
+    float dinges = (l - MaxLength) * ClampForce;
+    color.xyz = normalize(color.xyz) * (l - dinges);
+  }
+  gl_FragColor = color ;
 }
+
 
 #endif

@@ -20,18 +20,26 @@ void main() {
 
 #endif
 
-
 #ifdef FRAG
 
-uniform sampler2D image;
+uniform vec2 Point;
+uniform float	Radius;
+uniform float	EdgeSmooth;
+uniform vec4 Value;
 varying vec2 tc;
 
-uniform float c;
-const float h = 1./512.;
-void main(void) {
-    vec4 t = texture2D(image, tc);
-    t.g += c*(t.b + texture2D(image, vec2(tc.r, tc.g + h)).b );
-    gl_FragColor = t;
+void main(){
+  //vec2 tcs = vec2(tc.x * 512.0, tc.y * 512.0);
+  vec2 tcs = tc * 512.0;
+  vec4 color = Value;
+  float d = distance(Point, tcs);
+  float a = max((Radius - d) / Radius, 0.0);
+  float c = ceil(a);
+  color.xyz *= c;
+  color.w *= pow(a, EdgeSmooth + 0.1);
+  color.w = 1.0;
+  gl_FragColor = color;
 }
 
 #endif
+

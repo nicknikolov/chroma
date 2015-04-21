@@ -1,117 +1,220 @@
-var glu         = require('pex-glu');
-var color       = require('pex-color');
-var Context     = glu.Context;
-var Material    = require('../pex-hacks/Material.js');
-var Program     = glu.Program;
-var Color       = color.Color;
-var merge       = require('merge');
-var fs          = require('fs');
-var RenderTarget = glu.RenderTarget;
-var Texture2D = glu.Texture2D;
-var ScreenImage = glu.ScreenImage;
-
-var source  = fs.readFileSync(__dirname + '/source.glsl',   'utf8');
-var advec   = fs.readFileSync(__dirname + '/advect.glsl',   'utf8');
-var div     = fs.readFileSync(__dirname + '/div.glsl',      'utf8');
-var force   = fs.readFileSync(__dirname + '/force.glsl',    'utf8');
-var p       = fs.readFileSync(__dirname + '/p.glsl',        'utf8');
-var show    = fs.readFileSync(__dirname + '/show.glsl',     'utf8');
+var glu = require('pex-glu')
+  , Context = glu.Context
+  , Program = glu.Program
+  , FBO = glu.RenderTarget
+  , Texture2D = glu.Texture2D
+  , ScreenImage = glu.ScreenImage
+  , Color = require('pex-color').Color
+  , Material = require('../pex-hacks/Material.js')
+  , merge = require('merge')
+  , sys = require('pex-sys')
+  , fs = require('fs')
+  , PingPong = require('./PingPong.js')
+  //Shaders
+  , AdvectShader = require('./shaders/AdvectShader.js')
+  , ClampLengthShader = require('./shaders/ClampLengthShader.js')
+  , DiffuseShader = require('./shaders/DiffuseShader.js')
+  , DivergenceShader = require('./shaders/DivergenceShader.js')
+  , JacobiShader = require('./shaders/JacobiShader.js')
+  , AddForceShader = require('./shaders/AddForceShader.js')
+  , SubstractGradientShader = require('./shaders/SubstractGradientShader.js')
+  , FrameRenderer = require('./FrameRenderer.js');
 
 function Fluid() {
 
-    // Fluid variables
-    this.width = 512;
-    this.height = 512;
-    this.iterations = 10;
-    this.bu         = 10;
-    //-----------------------------
+  // Fluid variables
+  this.width = 512;
+  this.height = 512;
+  this.iterations = 20;
+  this.speed = 40;
+  this.cellSize = 0.6;
+  this.viscosity = 0.95;
+  this.dissipation = 0.0016;
+  this.clampForce = 0.2;
+  this.maxDensity = 0.9;
+  this.maxVelocity = 4.4;
+  //-----------------------------
+  var n = this.width;
 
-    var gl = Context.currentContext;
-    var n = 512;
-    var T = 0;
-    var pixels = [];
+  this.frameRenderer = new FrameRenderer(0, 0, n, n, n, n);
+  this.screenImage = new ScreenImage(null, 0, 0, n, n, n, n);
 
-    for(var i = 0; i<n; i++) {
-        for(var j = 0; j<n; j++){
-            T = 0; // background color
-            if (i>200 && i<300){
-                if (j>100 && j<240) T=1; // red
-                else if (j>260 && j<400) T= -1; // blue
-            }
-            pixels.push( 0, 0, T, 0 );
-        }
-    }
+  // Buffers
+  this.densityPingPong  = new PingPong(this.width, this.height);
+  this.densityPingPong.clear();
+  this.velocityPingPong = new PingPong(this.width, this.height);
+  this.velocityPingPong.clear();
+  this.pressurePingPong = new PingPong(this.width, this.height);
+  this.pressurePingPong.clear();
 
-    var b = new ArrayBuffer(n * n * 32);
-    var pixelsData = new Float32Array(b);
+  this.divergenceBuffer = new FBO(this.width, this.height);
+  this.divergenceBuffer.bindAndClear();
+  this.divergenceBuffer.unbind();
+  this.obstacleBuffer = new FBO(this.width, this.height);
+  this.obstacleBuffer.bindAndClear();
+  this.obstacleBuffer.unbind();
+  this.pressureBuffer = new FBO(this.width, this.height);
+  this.pressureBuffer.bindAndClear();
+  this.pressureBuffer.unbind();
+  this.comboObstacleBuffer = new FBO(this.width, this.height);
+  this.comboObstacleBuffer.bindAndClear();
+  this.comboObstacleBuffer.unbind();
 
-    for(var i=0; i<pixels.length; i++)
-        pixelsData[i] = pixels[i];
-
-    var texture0 = Texture2D.create(n, n, { bpp: 32, nearest: true });
-    texture0.bind();
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, n, n, 0, gl.RGBA, gl.FLOAT, pixelsData);
-
-    var texture1 = Texture2D.create(n, n, { bpp: 32, nearest: true });
-    texture1.bind();
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, n, n, 0, gl.RGBA, gl.FLOAT, pixelsData);
-
-    texture0.name = 'texture0';
-    texture1.name = 'texture1';
-
-    this.fbo0 = new RenderTarget(n, n, { color: texture0 });
-    this.fbo1 = new RenderTarget(n, n, { color: texture1 });
-    this.screenImage = new ScreenImage(null, 0, 0, n, n, n, n);
-
-
-    this.source     = new Program(source);
-    this.force      = new Program(force);
-    this.force.use();
-    this.force.uniforms.c(.001 * .5 * this.bu);
-    this.advec      = new Program(advec);
-    this.p          = new Program(p);
-    this.div        = new Program(div);
-    this.show       = new Program(show);
+  // Shaders
+  this.clampLengthShader = new ClampLengthShader();
+  this.advectShader = new AdvectShader();
+  this.diffuseShader = new DiffuseShader();
+  this.divergenceShader = new DivergenceShader();
+  this.jacobiShader = new JacobiShader();
+  this.addForceShader = new AddForceShader();
+  this.substractGradientShader = new SubstractGradientShader();
 
 }
 
-Fluid.prototype.iterate = function() {
-    var fbo1 = this.fbo1;
-    var fbo0 = this.fbo0;
-    var screenImage = this.screenImage;
+Fluid.prototype.addDensity = function (options) {
+  var texture = options.texture;
+  var strength = options.strength;
+  this.addForceShader.update({
+    destBuffer: this.densityPingPong.destBuffer
+  , backBufferTex: this.densityPingPong.sourceBuffer.getColorAttachment(0)
+  , addTex: texture
+  , force: strength
+  , frameRenderer: this.frameRenderer
+  });
+  this.densityPingPong.swap();
+}
 
-    fbo1.bind();
-    screenImage.draw(fbo0.getColorAttachment(0), this.source);
-    fbo1.unbind();
+Fluid.prototype.addVelocity = function (options) {
+  var texture = options.texture;
+  var strength = options.strength;
+  this.addForceShader.update({
+    destBuffer: this.velocityPingPong.destBuffer
+  , backBufferTex: this.velocityPingPong.sourceBuffer.getColorAttachment(0)
+  , addTex: texture
+  , force: strength
+  , frameRenderer: this.frameRenderer
+  });
+  this.velocityPingPong.swap();
+}
 
-    fbo0.bind();
-    this.force.use();
-    this.force.uniforms.c(.001*.5*this.bu);
-    screenImage.draw(fbo1.getColorAttachment(0), this.force);
-    fbo0.unbind();
+Fluid.prototype.iterate = function () {
+  this.deltaTime = sys.Time.delta;
+  this.timeStep = this.deltaTime * this.speed;
 
-    fbo1.bind();
-    screenImage.draw(fbo0.getColorAttachment(0), this.advec);
-    fbo1.unbind();
+  // Clamp Length
+  if (this.maxDensity > 0) {
+    this.clampLengthShader.update({
+      destBuffer: this.densityPingPong.destBuffer
+    , backBufferTex: this.densityPingPong.sourceBuffer.getColorAttachment(0)
+    , max: this.maxDensity
+    , clampForce: this.clampForce
+    , frameRenderer: this.frameRenderer
+    });
+    this.densityPingPong.swap();
+  }
+  if (this.maxVelocity > 0) {
+    this.clampLengthShader.update({
+      destBuffer: this.velocityPingPong.destBuffer
+    , backBufferTex: this.velocityPingPong.sourceBuffer.getColorAttachment(0)
+    , max: this.maxVelocity
+    , clampForce: this.clampForce
+    , frameRenderer: this.frameRenderer
+    });
+    this.velocityPingPong.swap();
+  }
 
+  // Advect
+  this.advectShader.update({
+    destBuffer: this.velocityPingPong.destBuffer
+  , backBufferTex: this.velocityPingPong.sourceBuffer.getColorAttachment(0)
+  , velocityTex: this.velocityPingPong.sourceBuffer.getColorAttachment(0)
+  , obstacleTex: this.comboObstacleBuffer.getColorAttachment(0)
+  , timeStep: this.timeStep
+  , dissipation: 1.0 - this.dissipation
+  , cellSize: this.cellSize
+  , frameRenderer: this.frameRenderer
+  });
+  this.velocityPingPong.swap();
+
+  this.advectShader.update({
+    destBuffer: this.densityPingPong.destBuffer
+  , backBufferTex: this.densityPingPong.sourceBuffer.getColorAttachment(0)
+  , velocityTex: this.velocityPingPong.sourceBuffer.getColorAttachment(0)
+  , obstacleTex: this.comboObstacleBuffer.getColorAttachment(0)
+  , timeStep: this.timeStep
+  , dissipation: 1.0 - this.dissipation
+  , cellSize: this.cellSize
+  , frameRenderer: this.frameRenderer
+  });
+  this.densityPingPong.swap();
+
+  // Diffuse
+  if (this.viscosity > 0) {
     for (var i=0; i<this.iterations; i++) {
-        fbo0.bind();
-        screenImage.draw(fbo1.getColorAttachment(0), this.p);
-        fbo0.unbind();
-        fbo1.bind();
-        screenImage.draw(fbo0.getColorAttachment(0), this.p);
-        fbo1.unbind();
+      this.diffuseShader.update({
+        destBuffer: this.velocityPingPong.destBuffer
+      , backBufferTex: this.velocityPingPong.sourceBuffer.getColorAttachment(0)
+      , obstacleTex: this.comboObstacleBuffer.getColorAttachment(0)
+      , viscosity: this.viscosity * this.deltaTime
+      , frameRenderer: this.frameRenderer
+      });
+      this.velocityPingPong.swap();
     }
+  }
 
-    fbo0.bind();
-    screenImage.draw(fbo1.getColorAttachment(0), this.div);
-    fbo0.unbind();
+  // Divergence and Jacobi
+  this.divergenceBuffer.bindAndClear();
+  this.divergenceBuffer.unbind();
+  this.divergenceShader.update({
+    destBuffer: this.divergenceBuffer
+  , velocityTex: this.velocityPingPong.sourceBuffer.getColorAttachment(0)
+  , obstacleTex: this.comboObstacleBuffer.getColorAttachment(0)
+  , cellSize: this.cellSize
+  , frameRenderer: this.frameRenderer
+  });
 
-    return fbo0.getColorAttachment(0);
+  this.pressurePingPong.clear();
+  for (var i=0; i<this.iterations; i++){
+    this.jacobiShader.update({
+      destBuffer: this.pressurePingPong.destBuffer
+    , backBufferTex: this.pressurePingPong.sourceBuffer.getColorAttachment(0)
+    , obstacleTex: this.obstacleBuffer.getColorAttachment(0)
+    , divergenceTex: this.divergenceBuffer.getColorAttachment(0)
+    , cellSize: this.cellSize
+    , frameRenderer: this.frameRenderer
+    });
+    this.pressurePingPong.swap();
+  }
+
+  if (this.addPressureBufferDidChange) {
+    this.addPressureBufferDidChange = false;
+    this.addForceShader.update({
+      destBuffer: this.pressurePingPong.destBuffer
+    , backBuffferTex: this.pressurePingPong.sourceBuffer.getColorAttachment(0)
+    , addTex: this.pressureBuffer.getColorAttachment(0)
+    , force: 1
+    , frameRenderer: this.frameRenderer
+    });
+    this.pressurePingPong.swap();
+  }
+
+  this.substractGradientShader.update({
+    destBuffer: this.velocityPingPong.destBuffer
+   , backBufferTex: this.velocityPingPong.sourceBuffer.getColorAttachment(0)
+   , pressureTex: this.pressurePingPong.sourceBuffer.getColorAttachment(0)
+   , obstacleTex: this.comboObstacleBuffer.getColorAttachment(0)
+   , cellSize: this.cellSize
+   , frameRenderer: this.frameRenderer
+  });
+  this.velocityPingPong.swap();
+
+  return this.densityPingPong.destBuffer.getColorAttachment(0);
+
 }
 
 Fluid.prototype.draw = function() {
-    this.screenImage.draw(this.fbo0.getColorAttachment(), this.show);
+  //this.screenImage.draw(this.velocityPingPong.destBuffer.getColorAttachment(0), this.show);
+  this.screenImage.draw(this.densityPingPong.destBuffer.getColorAttachment(0), this.show);
 }
 
 module.exports = Fluid;

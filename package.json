@@ -11,7 +11,7 @@
     "pex-fx": "^0.0.5",
     "pex-gen": "^0.1.0",
     "pex-geom": "^0.12.0",
-    "pex-glu": "^0.3.0",
+    "pex-glu": "^0.4.2",
     "pex-gui": "^0.5.1",
     "pex-materials": "^0.1.1",
     "pex-random": "^0.2.1",

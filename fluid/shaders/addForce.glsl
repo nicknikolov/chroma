@@ -20,23 +20,19 @@ void main() {
 
 #endif
 
-
 #ifdef FRAG
 
-uniform sampler2D image;
+uniform sampler2D Backbuffer;
+uniform sampler2D AddTexture;
+uniform float force;
 varying vec2 tc;
 
-const float h = 1./512.;
-void main(void) {
-    vec4 t = texture2D(image, tc);
-    t.a =
-        (texture2D(image, vec2(tc.r - h, tc.g)).a +
-         texture2D(image, vec2(tc.r + h, tc.g)).a +
-         texture2D(image, vec2(tc.r, tc.g - h)).a +
-         texture2D(image, vec2(tc.r, tc.g + h)).a -
-         (t.r - texture2D(image, vec2(tc.r - h, tc.g)).r +
-          t.g - texture2D(image, vec2(tc.r, tc.g - h)).g) *h) *.25;
-    gl_FragColor = t;
+void main(){
+  vec4 color = texture2D(Backbuffer, tc) + texture2D(AddTexture, tc) * force;
+  gl_FragColor = color;
 }
 
 #endif
+
+
+

@@ -5,7 +5,7 @@ attribute vec2 texCoord;
 uniform vec2 screenSize;
 uniform vec2 pixelPosition;
 uniform vec2 pixelSize;
-varying vec2 tc;
+varying vec2 vTexCoord;
 
 void main() {
   float tx = position.x * 0.5 + 0.5; //-1 -> 0, 1 -> 1
@@ -14,24 +14,24 @@ void main() {
   float x = (pixelPosition.x + pixelSize.x * tx)/screenSize.x * 2.0 - 1.0;  //0 -> -1, 1 -> 1
   //1.0 - (y + h)/sh * 2, 1.0 - (y + h)/sh * 2
   float y = 1.0 - (pixelPosition.y + pixelSize.y * ty)/screenSize.y * 2.0;  //0 -> 1, 1 -> -1
-  gl_Position = vec4(x, y, 0.0, 1.0);
-  tc = texCoord;
+  gl_Position = vec4(x, y, 0.0, 1.0); 
+  //gl_Position = vec4(position.xy, 0.0, 1.0);
+
+  vTexCoord = texCoord;
 }
 
 #endif
-
 
 #ifdef FRAG
 
+varying vec2 vTexCoord;
 uniform sampler2D image;
-varying vec2 tc;
+uniform float alpha;
 
-const float n = 512., h = 1./n;
-void main(void) {
-    vec4 t = texture2D(image, tc);
-    t.r -= (texture2D(image, vec2(tc.r + h, tc.g)).a - t.a)*n;
-    t.g -= (texture2D(image, vec2(tc.r, tc.g + h)).a - t.a)*n;
-    gl_FragColor = t;
+void main() {
+  gl_FragColor = texture2D(image, vTexCoord);
+  gl_FragColor.a *= alpha;
 }
 
 #endif
+

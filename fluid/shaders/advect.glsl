@@ -20,17 +20,30 @@ void main() {
 
 #endif
 
-
 #ifdef FRAG
 
-uniform sampler2D image;
+uniform sampler2D Backbuffer;
+uniform sampler2D Obstacle;
+uniform sampler2D Velocity;
+
+uniform float TimeStep;
+uniform float Dissipation;
+uniform float InverseCellSize;
+uniform vec2	Scale;
 varying vec2 tc;
 
-//precision highp float;
-varying float S;
-void main(void) {
-    vec4 t = texture2D(image, tc);
-    gl_FragColor = t;
+void main(){
+  vec2 tcs = vec2(tc.x * 512.0, tc.y * 512.0);
+
+  float xc = texture2D(Obstacle, tc).x;
+
+  float inverseSolid = 1.0 - ceil(xc - 0.5);
+
+  vec2 u = texture2D(Velocity, tc).rg;
+  vec2 coord =  tcs - TimeStep * InverseCellSize * u;
+
+  gl_FragColor = Dissipation * texture2D(Backbuffer, coord/512.0) * inverseSolid;
+
 }
 
 #endif
