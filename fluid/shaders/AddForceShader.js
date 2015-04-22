@@ -15,6 +15,8 @@ AddForceShader.prototype.update = function (options) {
     , backBufferTex = options.backBufferTex
     , addTex = options.addTex
     , force = options.force
+    , xNeg = options.xNeg || false
+    , yNeg = options.yNeg || false
     , frameRenderer = options.frameRenderer;
 
   if (!destBuffer) throw new Error("no destBuffer");
@@ -35,6 +37,8 @@ AddForceShader.prototype.update = function (options) {
   addTex.bind(1);
   this._program.uniforms.AddTexture(1);
   this._program.uniforms.force(force);
+  this._program.uniforms.xNeg(xNeg);
+  this._program.uniforms.yNeg(yNeg);
   frameRenderer.draw(this._program);
   destBuffer.unbind();
 

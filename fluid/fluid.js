@@ -25,26 +25,38 @@ function Fluid() {
   // Fluid variables
   this.width = 512;
   this.height = 512;
-  this.iterations = 70;
-  this.speed = 40;
+  this.iterations = 20;
+  this.speed = 10;
   this.cellSize = 0.5;
   this.viscosity = 0.15;
-  this.dissipation = 0.0016;
+  this.dissipation = 0.008;
   this.clampForce = 0.08;
   this.maxDensity = 0.9;
-  this.maxVelocity = 4.4;
+  this.maxVelocity = 2.4;
   //-----------------------------
   var n = this.width;
 
   this.frameRenderer = new FrameRenderer(0, 0, n, n, n, n);
   this.screenImage = new ScreenImage(null, 0, 0, n, n, n, n);
 
+  var gl = Context.currentContext;
+
   // Buffers
-  this.densityPingPong  = new PingPong(this.width, this.height);
+  this.densityPingPong  = new PingPong({
+    width: this.width
+  , height: this.height
+  , fboOpts: { format: gl.RGBA, bpp: 32 }
+  });
   this.densityPingPong.clear();
-  this.velocityPingPong = new PingPong(this.width, this.height);
+
+  this.velocityPingPong = new PingPong({
+    width: this.width
+  , height: this.height
+  , fboOpts: { format: gl.RGBA, bpp: 32 }
+  });
   this.velocityPingPong.clear();
-  this.pressurePingPong = new PingPong(this.width, this.height);
+  this.pressurePingPong = new PingPong({width: this.width,
+                                        height: this.height});
   this.pressurePingPong.clear();
 
   this.divergenceBuffer = new FBO(this.width, this.height);
@@ -88,12 +100,16 @@ Fluid.prototype.addDensity = function (options) {
 Fluid.prototype.addVelocity = function (options) {
   var texture = options.texture;
   var strength = options.strength;
+  var xNeg = options.xNeg || false;
+  var yNeg = options.yNeg || false;
   glu.enableBlending(false);
   this.addForceShader.update({
     destBuffer: this.velocityPingPong.destBuffer
   , backBufferTex: this.velocityPingPong.sourceBuffer.getColorAttachment(0)
   , addTex: texture
   , force: strength
+  , xNeg: xNeg
+  , yNeh: yNeg
   , frameRenderer: this.frameRenderer
   });
   this.velocityPingPong.swap();
@@ -104,6 +120,7 @@ Fluid.prototype.iterate = function () {
   this.timeStep = this.deltaTime * this.speed;
 
   glu.enableBlending(false);
+//  glu.enableAlphaBlending();
 
   // Clamp Length
   if (this.maxDensity > 0) {
@@ -128,31 +145,31 @@ Fluid.prototype.iterate = function () {
   }
 
 // Advect
-//  this.advectShader.update({
-//    destBuffer: this.velocityPingPong.destBuffer
-//  , backBufferTex: this.velocityPingPong.sourceBuffer.getColorAttachment(0)
-//  , velocityTex: this.velocityPingPong.sourceBuffer.getColorAttachment(0)
-//  , obstacleTex: this.comboObstacleBuffer.getColorAttachment(0)
-//  , timeStep: this.timeStep
-//  , dissipation: 1.0 - this.dissipation
-//  , cellSize: this.cellSize
-//  , frameRenderer: this.frameRenderer
-//  });
-//  this.velocityPingPong.swap();
-//
-//  this.advectShader.update({
-//    destBuffer: this.densityPingPong.destBuffer
-//  , backBufferTex: this.densityPingPong.sourceBuffer.getColorAttachment(0)
-//  , velocityTex: this.velocityPingPong.sourceBuffer.getColorAttachment(0)
-//  , obstacleTex: this.comboObstacleBuffer.getColorAttachment(0)
-//  , timeStep: this.timeStep
-//  , dissipation: 1.0 - this.dissipation
-//  , cellSize: this.cellSize
-//  , frameRenderer: this.frameRenderer
-//  });
-//  this.densityPingPong.swap();
+  this.advectShader.update({
+    destBuffer: this.velocityPingPong.destBuffer
+  , backBufferTex: this.velocityPingPong.sourceBuffer.getColorAttachment(0)
+  , velocityTex: this.velocityPingPong.sourceBuffer.getColorAttachment(0)
+  , obstacleTex: this.comboObstacleBuffer.getColorAttachment(0)
+  , timeStep: this.timeStep
+  , dissipation: 1.0 - this.dissipation
+  , cellSize: this.cellSize
+  , frameRenderer: this.frameRenderer
+  });
+  this.velocityPingPong.swap();
 
-  // Diffuse
+  this.advectShader.update({
+    destBuffer: this.densityPingPong.destBuffer
+  , backBufferTex: this.densityPingPong.sourceBuffer.getColorAttachment(0)
+  , velocityTex: this.velocityPingPong.sourceBuffer.getColorAttachment(0)
+  , obstacleTex: this.comboObstacleBuffer.getColorAttachment(0)
+  , timeStep: this.timeStep
+  , dissipation: 1.0 - this.dissipation
+  , cellSize: this.cellSize
+  , frameRenderer: this.frameRenderer
+  });
+  this.densityPingPong.swap();
+
+// Diffuse
   if (this.viscosity > 0) {
     for (var i=0; i<this.iterations; i++) {
       this.diffuseShader.update({

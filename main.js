@@ -87,9 +87,9 @@ sys.Window.create({
           }
         }));
 
-    this.camera = new PerspectiveCamera(60, this.width / this.height);
-    this.arcball = new Arcball(this, this.camera);
-    this.arcball.setPosition(new Vec3(0, 1.5, 1.5));
+//    this.camera = new PerspectiveCamera(60, this.width / this.height);
+//    this.arcball = new Arcball(this, this.camera);
+//    this.arcball.setPosition(new Vec3(0, 1.5, 1.5));
 
     this.on('keyDown', function(e) {
       if (e.str == 'd') {
@@ -117,7 +117,7 @@ sys.Window.create({
     , type: 'density'
     });
 
-    this.drawDensityForce.strength = 2.5;
+    this.drawDensityForce.strength = 0.5;
     this.drawDensityForce.radius = 0.05;
 
     this.lastMouse = new Vec2(0, 0);
@@ -125,7 +125,7 @@ sys.Window.create({
     this.on('mouseMoved', function (e) {
       var mouse = new Vec2();
       mouse.x = e.x / this.width;
-      mouse.y = e.y / this.height;
+      mouse.y = (this.height - e.y) / this.height;
       this.lastMouse.x = mouse.x;
       this.lastMouse.y = mouse.y;
     });
@@ -134,7 +134,7 @@ sys.Window.create({
       var mouse = new Vec2();
 
       mouse.x = e.x / this.width;
-      mouse.y = e.y / this.height;
+      mouse.y = (this.height - e.y) / this.height;
 
       var velocity = mouse.dup().sub(this.lastMouse);
       var vec = new Vec3(velocity.x, velocity.y, 0);
@@ -170,6 +170,8 @@ sys.Window.create({
         this.fluid.addVelocity({
           texture: this.drawVelocityForce.forceBuffer.getColorAttachment(0)
         , strength: velocityStrength
+        , xNeg: this.drawVelocityForce.xNeg
+        , yNeg: this.drawVelocityForce.yNeg
         });
       }
 
@@ -203,7 +205,7 @@ sys.Window.create({
      //   displacementMap     = fluidTexture;
 
 
-     glu.enableDepthReadAndWrite(true, true);
+//     glu.enableDepthReadAndWrite(true, true);
 //      this.mesh.draw(this.camera);
 
       //if (this.debug) this.meshWireframe.draw(this.camera);

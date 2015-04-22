@@ -22,7 +22,7 @@ AdvectShader.prototype.update = function (options) {
   if (!backBufferTex) throw new Error("no backBufferTex");
   if (!velocityTex) throw new Error("no velocityTex");
   if (!obstacleTex) throw new Error("no obstacleTex");
-  //if (!timeStep) throw new Error("no timeStep");
+  if (!timeStep) console.log("no timestep");
   if (!dissipation) throw new Error("no dissipation");
   if (!cellSize) throw new Error("no cellSize");
   if (!frameRenderer) throw new Error("no frameRenderer");

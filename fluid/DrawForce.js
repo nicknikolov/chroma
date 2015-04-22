@@ -31,6 +31,8 @@ function DrawForce (options) {
   this._program = new Program(shader);
   var n = this.width;
   this._frameRenderer = new FrameRenderer(0, 0, n, n, n, n);
+  this.xNeg = false;
+  this.yNeg = false;
 
 }
 
@@ -45,6 +47,9 @@ DrawForce.prototype.applyForce = function (normalizedPos) {
     typeForce.x *= this.width;
     typeForce.y *= this.width;
   }
+
+  this.xNeg = typeForce.x < 0 ? true : false;
+  this.yNeg = typeForce.y < 0 ? true : false;
 
   var value = new Vec4(typeForce.x, typeForce.y, typeForce.z, 1.0);
   glu.enableAlphaBlending();

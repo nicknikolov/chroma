@@ -5,9 +5,10 @@ function PingPong (options) {
   var options = options || {};
   this.width = options.width || 512;
   this.height = options.height || 512;
+  this.fboOpts = options.fboOpts || {};
 
-  this.sourceBuffer = new FBO(this.width, this.height);
-  this.destBuffer = new FBO(this.width, this.height);
+  this.sourceBuffer = new FBO(this.width, this.height, this.fboOpts);
+  this.destBuffer = new FBO(this.width, this.height, this.fboOpts);
 }
 
 PingPong.prototype.swap = function () {

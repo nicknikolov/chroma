@@ -35,6 +35,7 @@ void v2TexNeighbors(sampler2D tex, vec2 st,
   right  = texture2D(tex, st + vec2(1, 0) * texelSize ).xy;
   bottom = texture2D(tex, st - vec2(0, 1) * texelSize ).xy;
   top    = texture2D(tex, st + vec2(0, 1) * texelSize ).xy;
+
 }
 
 void fRoundTexNeighbors(sampler2D tex, vec2 st,
@@ -44,6 +45,7 @@ void fRoundTexNeighbors(sampler2D tex, vec2 st,
   right  = ceil(texture2D(tex, st + vec2(1, 0) * texelSize ).x - 0.5);
   bottom = ceil(texture2D(tex, st - vec2(0, 1) * texelSize ).x - 0.5);
   top    = ceil(texture2D(tex, st + vec2(0, 1) * texelSize ).x - 0.5);
+
 }
 
 void main(){
