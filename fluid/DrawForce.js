@@ -21,7 +21,7 @@ function DrawForce (options) {
   this.force = new Vec3(0.3, 0.7, 0.9);
   this.edge = 1;
 
-  this.forceBuffer = new FBO(this.width, this.height);
+  this.forceBuffer = new FBO(this.width, this.height, {bpp: 32});
   this.density = new Color(1, 1, 1, 1);
   this.velocity = new Vec2(0,0);
 

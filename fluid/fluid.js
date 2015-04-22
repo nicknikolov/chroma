@@ -59,16 +59,16 @@ function Fluid() {
                                         height: this.height});
   this.pressurePingPong.clear();
 
-  this.divergenceBuffer = new FBO(this.width, this.height);
+  this.divergenceBuffer = new FBO(this.width, this.height, {bpp: 32});
   this.divergenceBuffer.bindAndClear();
   this.divergenceBuffer.unbind();
-  this.obstacleBuffer = new FBO(this.width, this.height);
+  this.obstacleBuffer = new FBO(this.width, this.height, {bpp: 32});
   this.obstacleBuffer.bindAndClear();
   this.obstacleBuffer.unbind();
-  this.pressureBuffer = new FBO(this.width, this.height);
+  this.pressureBuffer = new FBO(this.width, this.height, {bpp: 32});
   this.pressureBuffer.bindAndClear();
   this.pressureBuffer.unbind();
-  this.comboObstacleBuffer = new FBO(this.width, this.height);
+  this.comboObstacleBuffer = new FBO(this.width, this.height, {bpp: 32});
   this.comboObstacleBuffer.bindAndClear();
   this.comboObstacleBuffer.unbind();
 

@@ -31,23 +31,23 @@ varying vec2 tc;
 
 void main(){
 
- // vec4 color = texture2D(Backbuffer, tc) + texture2D(AddTexture, tc) * force;
-  vec4 color = texture2D(Backbuffer, tc);
-  vec4 at = texture2D(AddTexture, tc);
-
-  if (xNeg == true) {
-    color.r -= at.r * force * 2;
-  } else {
-    color.r += at.r * force;
-  }
-
-  if (yNeg == true) {
-    color.g -= at.g * force * 2;
-  } else {
-    color.g += at.g * force;
-  }
-
-  color.b += at.b * force;
+  vec4 color = texture2D(Backbuffer, tc) + texture2D(AddTexture, tc) * force;
+//  vec4 color = texture2D(Backbuffer, tc);
+//  vec4 at = texture2D(AddTexture, tc);
+//
+//  if (xNeg == true) {
+//    color.r -= at.r * force * 2;
+//  } else {
+//    color.r += at.r * force;
+//  }
+//
+//  if (yNeg == true) {
+//    color.g -= at.g * force * 2;
+//  } else {
+//    color.g += at.g * force;
+//  }
+//
+//  color.b += at.b * force;
 
   gl_FragColor = color;
 }
