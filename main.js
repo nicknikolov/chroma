@@ -228,7 +228,7 @@ sys.Window.create({
 
       //if (this.debug) this.meshWireframe.draw(this.camera);
 
-    
+
 
     } catch (e) {
       console.log(e.stack);

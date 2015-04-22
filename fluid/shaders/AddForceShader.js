@@ -39,7 +39,6 @@ AddForceShader.prototype.update = function (options) {
   this._program.uniforms.force(force);
   //this._program.uniforms.xNeg(xNeg);
   //this._program.uniforms.yNeg(yNeg);
->>>>>>> marcin
   frameRenderer.draw(this._program);
   destBuffer.unbind();
 

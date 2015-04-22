@@ -53,7 +53,6 @@ DrawForce.prototype.applyForce = function (normalizedPos) {
 
   var value = new Vec4(typeForce.x, typeForce.y, typeForce.z, 1.0);
   glu.enableAlphaBlending();
-  //glu.enableAdditiveBlending();
   this.forceBuffer.bind();
   this._program.use();
   // vert
@@ -73,9 +72,9 @@ DrawForce.prototype.applyForce = function (normalizedPos) {
 }
 
 DrawForce.prototype.clear = function () {
- this.forceBuffer.bind();
- glu.clearColor(Color.Black);
- this.forceBuffer.unbind();
+  this.forceBuffer.bind();
+  glu.clearColor(Color.Black);
+  this.forceBuffer.unbind();
 }
 
 DrawForce.prototype.update = function () {
