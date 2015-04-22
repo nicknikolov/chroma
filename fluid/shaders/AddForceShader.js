@@ -37,8 +37,8 @@ AddForceShader.prototype.update = function (options) {
   addTex.bind(1);
   this._program.uniforms.AddTexture(1);
   this._program.uniforms.force(force);
-  this._program.uniforms.xNeg(xNeg);
-  this._program.uniforms.yNeg(yNeg);
+  //this._program.uniforms.xNeg(xNeg);
+  //this._program.uniforms.yNeg(yNeg);
   frameRenderer.draw(this._program);
   destBuffer.unbind();
 

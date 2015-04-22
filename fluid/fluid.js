@@ -59,16 +59,16 @@ function Fluid() {
                                         height: this.height});
   this.pressurePingPong.clear();
 
-  this.divergenceBuffer = new FBO(this.width, this.height);
+  this.divergenceBuffer = new FBO(this.width, this.height, { bpp: 32 });
   this.divergenceBuffer.bindAndClear();
   this.divergenceBuffer.unbind();
-  this.obstacleBuffer = new FBO(this.width, this.height);
+  this.obstacleBuffer = new FBO(this.width, this.height, { bpp: 32 });
   this.obstacleBuffer.bindAndClear();
   this.obstacleBuffer.unbind();
-  this.pressureBuffer = new FBO(this.width, this.height);
+  this.pressureBuffer = new FBO(this.width, this.height, { bpp: 32 });
   this.pressureBuffer.bindAndClear();
   this.pressureBuffer.unbind();
-  this.comboObstacleBuffer = new FBO(this.width, this.height);
+  this.comboObstacleBuffer = new FBO(this.width, this.height, { bpp: 32 });
   this.comboObstacleBuffer.bindAndClear();
   this.comboObstacleBuffer.unbind();
 
@@ -235,7 +235,10 @@ Fluid.prototype.iterate = function () {
 
 Fluid.prototype.draw = function() {
   //this.screenImage.draw(this.velocityPingPong.destBuffer.getColorAttachment(0), this.show);
-  this.screenImage.draw(this.densityPingPong.destBuffer.getColorAttachment(0), this.show);
+  //this.screenImage.draw(this.densityPingPong.destBuffer.getColorAttachment(0), this.show);
+  var gl = Context.currentContext;
+  this.screenImage.setImage(this.densityPingPong.destBuffer.getColorAttachment(0));
+  this.screenImage.draw();
 }
 
 module.exports = Fluid;

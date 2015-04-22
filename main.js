@@ -78,14 +78,14 @@ sys.Window.create({
     this.gui.addParam('displacementHeight', this, 'displacementHeight');
     this.gui.addParam('iterations', this.fluid, 'iterations', {min: 0, max:50});
     this.gui.addParam('bu', this.fluid, 'bu', {min: 0, max:100});
-    this.gui.addTextureList('Material', this, 'currentTexture',
-        this.textures.map(function(tex, i) {
-          return {
-            texture: tex,
-            name: 'Tex' + i,
-            value: i
-          }
-        }));
+    //this.gui.addTextureList('Material', this, 'currentTexture',
+    //    this.textures.map(function(tex, i) {
+    //      return {
+    //        texture: tex,
+    //        name: 'Tex' + i,
+    //        value: i
+    //      }
+    //    }));
 
 //    this.camera = new PerspectiveCamera(60, this.width / this.height);
 //    this.arcball = new Arcball(this, this.camera);
@@ -130,6 +130,11 @@ sys.Window.create({
       this.lastMouse.y = mouse.y;
     });
 
+    this.on('mouseDown', function(e) {
+      this.drawDensityForce.clear();
+      this.drawVelocityForce.clear();
+    }.bind(this));
+
     this.on('mouseDragged', function(e) {
       var mouse = new Vec2();
 
@@ -147,6 +152,9 @@ sys.Window.create({
       this.lastMouse.y = mouse.y;
 
     });
+
+    this.gui.addTexture2D('Velocity', this.drawVelocityForce.forceBuffer.getColorAttachment(0))
+    this.gui.addTexture2D('Density', this.drawDensityForce.forceBuffer.getColorAttachment(0))
   },
   draw: function() {
     try {
@@ -157,6 +165,7 @@ sys.Window.create({
 
       this.drawDensityForce.update();
       if (this.drawDensityForce.forceChanged) {
+        this.drawDensityForce.forceChanged = false;
         var densityStrength = this.drawDensityForce.strength * sys.Time.delta;
         this.fluid.addDensity({
           texture: this.drawDensityForce.forceBuffer.getColorAttachment(0)
@@ -164,8 +173,11 @@ sys.Window.create({
         });
       }
 
+
+
       this.drawVelocityForce.update();
       if (this.drawVelocityForce.forceChanged) {
+        this.drawVelocityForce.forceChanged = false;
         var velocityStrength = this.drawVelocityForce.strength * sys.Time.delta;
         this.fluid.addVelocity({
           texture: this.drawVelocityForce.forceBuffer.getColorAttachment(0)
@@ -178,6 +190,8 @@ sys.Window.create({
       var fluidTexture = this.fluid.iterate();
       glu.clearColorAndDepth(Color.Black);
       this.fluid.draw();
+
+      //this.fluid.screenImage.draw(this.fluid.densityPingPong.destBuffer.getColorAttachment(0), this.show);
 
      // glu.clearDepth();
      // glu.enableDepthReadAndWrite(true);
@@ -205,12 +219,16 @@ sys.Window.create({
      //   displacementMap     = fluidTexture;
 
 
-//     glu.enableDepthReadAndWrite(true, true);
+    //glu.enableDepthReadAndWrite(false, false);
+    //glu.enableAdditiveBlending(true);
 //      this.mesh.draw(this.camera);
+
+  glu.clearDepth();
+  this.gui.draw();
 
       //if (this.debug) this.meshWireframe.draw(this.camera);
 
-//      this.gui.draw();
+    
 
     } catch (e) {
       console.log(e.stack);

@@ -31,7 +31,8 @@ varying vec2 tc;
 
 void main(){
 
- // vec4 color = texture2D(Backbuffer, tc) + texture2D(AddTexture, tc) * force;
+  vec4 color = texture2D(Backbuffer, tc) + texture2D(AddTexture, tc) * force;
+  /*
   vec4 color = texture2D(Backbuffer, tc);
   vec4 at = texture2D(AddTexture, tc);
 
@@ -48,6 +49,7 @@ void main(){
   }
 
   color.b += at.b * force;
+  */
 
   gl_FragColor = color;
 }
