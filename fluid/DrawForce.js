@@ -21,7 +21,7 @@ function DrawForce (options) {
   this.force = new Vec3(0.3, 0.7, 0.9);
   this.edge = 1;
 
-  this.forceBuffer = new FBO(this.width, this.height, {bpp: 32});
+  this.forceBuffer = new FBO(this.width, this.height, { bpp: 32 });
   this.density = new Color(1, 1, 1, 1);
   this.velocity = new Vec2(0,0);
 
@@ -53,6 +53,7 @@ DrawForce.prototype.applyForce = function (normalizedPos) {
 
   var value = new Vec4(typeForce.x, typeForce.y, typeForce.z, 1.0);
   glu.enableAlphaBlending();
+  //glu.enableAdditiveBlending();
   this.forceBuffer.bind();
   this._program.use();
   // vert
@@ -69,7 +70,12 @@ DrawForce.prototype.applyForce = function (normalizedPos) {
   glu.enableBlending(false);
 
   this.forceApplied = true;
+}
 
+DrawForce.prototype.clear = function () {
+ this.forceBuffer.bind();
+ glu.clearColor(Color.Black);
+ this.forceBuffer.unbind();
 }
 
 DrawForce.prototype.update = function () {
