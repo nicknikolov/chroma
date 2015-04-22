@@ -108,18 +108,24 @@ sys.Window.create({
     , type: 'velocity'
     });
 
+    this.drawVelocityForce.strength = 2.9;
+    this.drawVelocityForce.radius = 0.05;
+
     this.drawDensityForce = new DrawForce({
       width: this.width
     , height: this.height
     , type: 'density'
     });
 
+    this.drawDensityForce.strength = 2.5;
+    this.drawDensityForce.radius = 0.05;
+
     this.lastMouse = new Vec2(0, 0);
 
     this.on('mouseMoved', function (e) {
       var mouse = new Vec2();
       mouse.x = e.x / this.width;
-      mouse.y = (this.height - e.y) / this.height;
+      mouse.y = e.y / this.height;
       this.lastMouse.x = mouse.x;
       this.lastMouse.y = mouse.y;
     });
@@ -128,10 +134,11 @@ sys.Window.create({
       var mouse = new Vec2();
 
       mouse.x = e.x / this.width;
-      mouse.y = (this.height - e.y) / this.height;
+      mouse.y = e.y / this.height;
 
       var velocity = mouse.dup().sub(this.lastMouse);
       var vec = new Vec3(velocity.x, velocity.y, 0);
+
       this.drawVelocityForce.force = vec.clone();
       this.drawVelocityForce.applyForce(mouse);
       this.drawDensityForce.applyForce(mouse);
@@ -146,27 +153,31 @@ sys.Window.create({
       //disable depth test
       glu.enableDepthReadAndWrite(false, false);
       glu.viewport(0, 0, this.fluid.width, this.fluid.height);
-
-      var fluidTexture = this.fluid.iterate();
       glu.viewport(0, 0, this.width, this.height);
+
+
       glu.clearColorAndDepth(Color.Black);
 
-      this.fluid.draw();
       this.drawDensityForce.update();
-      this.drawVelocityForce.update();
-
-      var strength = this.drawDensityForce.strength * sys.Time.delta;
-      if(this.drawDensityForce.forceChanged)
+      if(this.drawDensityForce.forceChanged) {
+        var densityStrength = this.drawDensityForce.strength * sys.Time.delta;
         this.fluid.addDensity({
           texture: this.drawDensityForce.forceBuffer.getColorAttachment(0)
-        , strength: strength
+        , strength: densityStrength
         });
+      }
 
-      if(this.drawVelocityForce.forceChanged)
+      this.drawVelocityForce.update();
+      if(this.drawVelocityForce.forceChanged) {
+        var velocityStrength = this.drawVelocityForce.strength * sys.Time.delta;
         this.fluid.addVelocity({
           texture: this.drawVelocityForce.forceBuffer.getColorAttachment(0)
-        , strength: strength
+        , strength: velocityStrength
         });
+      }
+
+      var fluidTexture = this.fluid.iterate();
+      this.fluid.draw();
 
       glu.clearDepth();
       glu.enableDepthReadAndWrite(true);

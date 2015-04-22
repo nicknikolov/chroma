@@ -25,12 +25,12 @@ function Fluid() {
   // Fluid variables
   this.width = 512;
   this.height = 512;
-  this.iterations = 20;
+  this.iterations = 70;
   this.speed = 40;
-  this.cellSize = 0.6;
-  this.viscosity = 0.95;
+  this.cellSize = 0.5;
+  this.viscosity = 0.15;
   this.dissipation = 0.0016;
-  this.clampForce = 0.2;
+  this.clampForce = 0.08;
   this.maxDensity = 0.9;
   this.maxVelocity = 4.4;
   //-----------------------------
@@ -123,7 +123,7 @@ Fluid.prototype.iterate = function () {
     this.velocityPingPong.swap();
   }
 
-  // Advect
+// Advect
   this.advectShader.update({
     destBuffer: this.velocityPingPong.destBuffer
   , backBufferTex: this.velocityPingPong.sourceBuffer.getColorAttachment(0)

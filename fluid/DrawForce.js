@@ -6,6 +6,7 @@ var Program = require('pex-glu').Program
   , Vec3 = require('pex-geom').Vec3
   , Vec4 = require('pex-geom').Vec4
   , fs = require('fs')
+  , glu = require('pex-glu');
 
 var shader = fs.readFileSync(__dirname + '/drawForce.glsl', 'utf8');
 
@@ -16,9 +17,9 @@ function DrawForce (options) {
   this.height = options.height || 512;
   this.type = options.type || 'density';
   this.radius = 0.05;
-  this.strength = 1.5;
+  this.strength = 2.5;
   this.force = new Vec3(0.3, 0.7, 0.9);
-  this.edge = 0.3;
+  this.edge = 1;
 
   this.forceBuffer = new FBO(this.width, this.height);
   this.density = new Color(1, 1, 1, 1);

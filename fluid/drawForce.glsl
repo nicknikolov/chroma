@@ -29,7 +29,6 @@ uniform vec4 Value;
 varying vec2 tc;
 
 void main(){
-  //vec2 tcs = vec2(tc.x * 512.0, tc.y * 512.0);
   vec2 tcs = tc * 512.0;
   vec4 color = Value;
   float d = distance(Point, tcs);
@@ -37,7 +36,6 @@ void main(){
   float c = ceil(a);
   color.xyz *= c;
   color.w *= pow(a, EdgeSmooth + 0.1);
-  color.w = 1.0;
   gl_FragColor = color;
 }
 

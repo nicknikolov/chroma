@@ -20,15 +20,15 @@ AddForceShader.prototype.update = function (options) {
   if (!destBuffer) throw new Error("no destBuffer");
   if (!backBufferTex) throw new Error("no backBufferTex");
   if (!addTex) throw new Error("no velocityTex");
-  if (!force) throw new Error("no obstacleTex");
+  //if (!force) throw new Error("no obstacleTex");
   if (!frameRenderer) throw new Error("no frameRenderer");
 
   destBuffer.bind();
   this._program.use();
   //vert
-//  this._program.uniforms.screenSize(new Vec2(512, 512));
-//  this._program.uniforms.pixelPosition(new Vec2(0, 0));
-//  this._program.uniforms.pixelSize(new Vec2(512, 512));
+  this._program.uniforms.screenSize(new Vec2(512, 512));
+  this._program.uniforms.pixelPosition(new Vec2(0, 0));
+  this._program.uniforms.pixelSize(new Vec2(512, 512));
   //frag
   backBufferTex.bind(0);
   this._program.uniforms.Backbuffer(0);
