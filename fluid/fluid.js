@@ -74,6 +74,7 @@ function Fluid() {
 Fluid.prototype.addDensity = function (options) {
   var texture = options.texture;
   var strength = options.strength;
+  glu.enableBlending(false);
   this.addForceShader.update({
     destBuffer: this.densityPingPong.destBuffer
   , backBufferTex: this.densityPingPong.sourceBuffer.getColorAttachment(0)
@@ -87,6 +88,7 @@ Fluid.prototype.addDensity = function (options) {
 Fluid.prototype.addVelocity = function (options) {
   var texture = options.texture;
   var strength = options.strength;
+  glu.enableBlending(false);
   this.addForceShader.update({
     destBuffer: this.velocityPingPong.destBuffer
   , backBufferTex: this.velocityPingPong.sourceBuffer.getColorAttachment(0)
@@ -100,6 +102,8 @@ Fluid.prototype.addVelocity = function (options) {
 Fluid.prototype.iterate = function () {
   this.deltaTime = sys.Time.delta;
   this.timeStep = this.deltaTime * this.speed;
+
+  glu.enableBlending(false);
 
   // Clamp Length
   if (this.maxDensity > 0) {
@@ -124,29 +128,29 @@ Fluid.prototype.iterate = function () {
   }
 
 // Advect
-  this.advectShader.update({
-    destBuffer: this.velocityPingPong.destBuffer
-  , backBufferTex: this.velocityPingPong.sourceBuffer.getColorAttachment(0)
-  , velocityTex: this.velocityPingPong.sourceBuffer.getColorAttachment(0)
-  , obstacleTex: this.comboObstacleBuffer.getColorAttachment(0)
-  , timeStep: this.timeStep
-  , dissipation: 1.0 - this.dissipation
-  , cellSize: this.cellSize
-  , frameRenderer: this.frameRenderer
-  });
-  this.velocityPingPong.swap();
-
-  this.advectShader.update({
-    destBuffer: this.densityPingPong.destBuffer
-  , backBufferTex: this.densityPingPong.sourceBuffer.getColorAttachment(0)
-  , velocityTex: this.velocityPingPong.sourceBuffer.getColorAttachment(0)
-  , obstacleTex: this.comboObstacleBuffer.getColorAttachment(0)
-  , timeStep: this.timeStep
-  , dissipation: 1.0 - this.dissipation
-  , cellSize: this.cellSize
-  , frameRenderer: this.frameRenderer
-  });
-  this.densityPingPong.swap();
+//  this.advectShader.update({
+//    destBuffer: this.velocityPingPong.destBuffer
+//  , backBufferTex: this.velocityPingPong.sourceBuffer.getColorAttachment(0)
+//  , velocityTex: this.velocityPingPong.sourceBuffer.getColorAttachment(0)
+//  , obstacleTex: this.comboObstacleBuffer.getColorAttachment(0)
+//  , timeStep: this.timeStep
+//  , dissipation: 1.0 - this.dissipation
+//  , cellSize: this.cellSize
+//  , frameRenderer: this.frameRenderer
+//  });
+//  this.velocityPingPong.swap();
+//
+//  this.advectShader.update({
+//    destBuffer: this.densityPingPong.destBuffer
+//  , backBufferTex: this.densityPingPong.sourceBuffer.getColorAttachment(0)
+//  , velocityTex: this.velocityPingPong.sourceBuffer.getColorAttachment(0)
+//  , obstacleTex: this.comboObstacleBuffer.getColorAttachment(0)
+//  , timeStep: this.timeStep
+//  , dissipation: 1.0 - this.dissipation
+//  , cellSize: this.cellSize
+//  , frameRenderer: this.frameRenderer
+//  });
+//  this.densityPingPong.swap();
 
   // Diffuse
   if (this.viscosity > 0) {

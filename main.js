@@ -151,15 +151,12 @@ sys.Window.create({
   draw: function() {
     try {
       //disable depth test
-      glu.enableDepthReadAndWrite(false, false);
-      glu.viewport(0, 0, this.fluid.width, this.fluid.height);
-      glu.viewport(0, 0, this.width, this.height);
-
-
-      glu.clearColorAndDepth(Color.Black);
+      //glu.enableDepthReadAndWrite(false, false);
+      //glu.viewport(0, 0, this.fluid.width, this.fluid.height);
+      //glu.viewport(0, 0, this.width, this.height);
 
       this.drawDensityForce.update();
-      if(this.drawDensityForce.forceChanged) {
+      if (this.drawDensityForce.forceChanged) {
         var densityStrength = this.drawDensityForce.strength * sys.Time.delta;
         this.fluid.addDensity({
           texture: this.drawDensityForce.forceBuffer.getColorAttachment(0)
@@ -168,7 +165,7 @@ sys.Window.create({
       }
 
       this.drawVelocityForce.update();
-      if(this.drawVelocityForce.forceChanged) {
+      if (this.drawVelocityForce.forceChanged) {
         var velocityStrength = this.drawVelocityForce.strength * sys.Time.delta;
         this.fluid.addVelocity({
           texture: this.drawVelocityForce.forceBuffer.getColorAttachment(0)
@@ -177,35 +174,36 @@ sys.Window.create({
       }
 
       var fluidTexture = this.fluid.iterate();
+      glu.clearColorAndDepth(Color.Black);
       this.fluid.draw();
 
-      glu.clearDepth();
-      glu.enableDepthReadAndWrite(true);
+     // glu.clearDepth();
+     // glu.enableDepthReadAndWrite(true);
 
-      this.mesh.material.uniforms.
-        showNormals         = this.showNormals;
-      this.mesh.material.uniforms.
-        displacementHeight  = this.displacementHeight;
-      this.mesh.material.uniforms.
-        texture             = this.textures[this.currentTexture];
-      this.mesh.material.uniforms.
-        time                = sys.Time.seconds;
-      this.mesh.material.uniforms.
-        displacementMap     = fluidTexture;
+     // this.mesh.material.uniforms.
+     //   showNormals         = this.showNormals;
+     // this.mesh.material.uniforms.
+     //   displacementHeight  = this.displacementHeight;
+     // this.mesh.material.uniforms.
+     //   texture             = this.textures[this.currentTexture];
+     // this.mesh.material.uniforms.
+     //   time                = sys.Time.seconds;
+     // this.mesh.material.uniforms.
+     //   displacementMap     = fluidTexture;
 
-      this.meshWireframe.material.uniforms.
-        showNormals         = this.showNormals;
-      this.meshWireframe.material.uniforms.
-        displacementHeight  = this.displacementHeight;
-      this.meshWireframe.material.
-        texture             = this.textures[this.currentTexture];
-      this.meshWireframe.material.uniforms.
-        time                = sys.Time.seconds;
-      this.meshWireframe.material.uniforms.
-        displacementMap     = fluidTexture;
+     // this.meshWireframe.material.uniforms.
+     //   showNormals         = this.showNormals;
+     // this.meshWireframe.material.uniforms.
+     //   displacementHeight  = this.displacementHeight;
+     // this.meshWireframe.material.
+     //   texture             = this.textures[this.currentTexture];
+     // this.meshWireframe.material.uniforms.
+     //   time                = sys.Time.seconds;
+     // this.meshWireframe.material.uniforms.
+     //   displacementMap     = fluidTexture;
 
 
-      glu.enableDepthReadAndWrite(true, true);
+     glu.enableDepthReadAndWrite(true, true);
 //      this.mesh.draw(this.camera);
 
       //if (this.debug) this.meshWireframe.draw(this.camera);

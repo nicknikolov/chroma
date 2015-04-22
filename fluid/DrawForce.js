@@ -46,6 +46,8 @@ DrawForce.prototype.applyForce = function (normalizedPos) {
     typeForce.y *= this.width;
   }
 
+  var value = new Vec4(typeForce.x, typeForce.y, typeForce.z, 1.0);
+  glu.enableAlphaBlending();
   this.forceBuffer.bind();
   this._program.use();
   // vert
@@ -56,9 +58,10 @@ DrawForce.prototype.applyForce = function (normalizedPos) {
   this._program.uniforms.Point(absPos);
   this._program.uniforms.Radius(absRadius);
   this._program.uniforms.EdgeSmooth(this.edge);
-  this._program.uniforms.Value(typeForce);
+  this._program.uniforms.Value(value);
   this._frameRenderer.draw(this._program);
   this.forceBuffer.unbind();
+  glu.enableBlending(false);
 
   this.forceApplied = true;
 
