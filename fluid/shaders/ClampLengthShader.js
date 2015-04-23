@@ -2,9 +2,12 @@ var glu = require('pex-glu')
   , Context = glu.Context
   , Program = glu.Program
   , fs = require('fs')
-  , shader = fs.readFileSync(__dirname + '/clampLength.glsl', 'utf8');
+  , shader = fs.readFileSync(__dirname + '/clampLength.glsl', 'utf8')
+  , Vec2 = require('pex-geom').Vec2;
 
-function ClampLengthShader () {
+function ClampLengthShader (width, height) {
+  this.width = width || 512;
+  this.height = height || 512;
   this._program = new Program(shader);
 }
 
@@ -23,6 +26,11 @@ ClampLengthShader.prototype.update = function (options) {
 
   destBuffer.bind();
   this._program.use();
+  //vert
+  this._program.uniforms.screenSize(new Vec2(this.width, this.height));
+  this._program.uniforms.pixelPosition(new Vec2(0, 0));
+  this._program.uniforms.pixelSize(new Vec2(this.width, this.height));
+  //frag
   backBufferTex.bind(0);
   this._program.uniforms.Backbuffer(0);
   this._program.uniforms.MaxLength(max);

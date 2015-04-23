@@ -25,31 +25,13 @@ void main() {
 uniform sampler2D Backbuffer;
 uniform sampler2D AddTexture;
 uniform float force;
-uniform bool xNeg;
-uniform bool yNeg;
+uniform vec2 Scale;
 varying vec2 tc;
 
 void main(){
+  vec2 tc2 = tc * Scale;
 
-  vec4 color = texture2D(Backbuffer, tc) + texture2D(AddTexture, tc) * force;
-  /*
-  vec4 color = texture2D(Backbuffer, tc);
-  vec4 at = texture2D(AddTexture, tc);
-
-  if (xNeg == true) {
-    color.r -= at.r * force * 2;
-  } else {
-    color.r += at.r * force;
-  }
-
-  if (yNeg == true) {
-    color.g -= at.g * force * 2;
-  } else {
-    color.g += at.g * force;
-  }
-
-  color.b += at.b * force;
-  */
+  vec4 color = texture2D(Backbuffer, tc) + texture2D(AddTexture, tc2) * force;
   gl_FragColor = color;
 }
 

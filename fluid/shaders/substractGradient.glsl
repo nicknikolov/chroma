@@ -25,26 +25,30 @@ void main() {
 uniform sampler2D Velocity;
 uniform sampler2D Pressure;
 uniform sampler2D Obstacle;
+uniform float Width;
+uniform float Height;
 uniform float HalfInverseCellSize;
 varying vec2 tc;
 
 void fTexNeighbors(sampler2D tex, vec2 st,
-    out float left, out float right, out float bottom, out float top) {
+    out float left, out float right, out float bottom, out float top, vec2 ts) {
   float texelSize = 1.0 / 512.0;
-  left   = texture2D(tex, st - vec2(1, 0) * texelSize ).x;
-  right  = texture2D(tex, st + vec2(1, 0) * texelSize ).x;
-  bottom = texture2D(tex, st - vec2(0, 1) * texelSize ).x;
-  top    = texture2D(tex, st + vec2(0, 1) * texelSize ).x;
+  left   = texture2D(tex, st - vec2(1, 0) / ts ).x;
+  right  = texture2D(tex, st + vec2(1, 0) / ts ).x;
+  bottom = texture2D(tex, st - vec2(0, 1) / ts ).x;
+  top    = texture2D(tex, st + vec2(0, 1) / ts ).x;
 }
 
 void main(){
 
+  vec2 texelSize = vec2(Width, Height);
+
   float pL; float pR; float pB; float pT;
-  fTexNeighbors (Pressure, tc, pL, pR, pB, pT);
+  fTexNeighbors (Pressure, tc, pL, pR, pB, pT, texelSize);
   float pC = texture2D(Pressure, tc).x;
 
   float oL; float oR; float oB; float oT;
-  fTexNeighbors (Obstacle, tc, oL, oR, oB, oT);
+  fTexNeighbors (Obstacle, tc, oL, oR, oB, oT, texelSize);
 
   vec2 vMask = vec2(1.0,1.0);
 

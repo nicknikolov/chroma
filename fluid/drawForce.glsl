@@ -26,10 +26,13 @@ uniform vec2 Point;
 uniform float	Radius;
 uniform float	EdgeSmooth;
 uniform vec4 Value;
+uniform float Width;
+uniform float Height;
 varying vec2 tc;
 
 void main(){
-  vec2 tcs = tc * 512.0;
+  vec2 texelSize = vec2(Width, Height);
+  vec2 tcs = tc * texelSize;
   vec4 color = Value;
   float d = distance(Point, tcs);
   float a = max((Radius - d) / Radius, 0.0);

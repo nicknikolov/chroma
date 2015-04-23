@@ -13,8 +13,8 @@ var shader = fs.readFileSync(__dirname + '/drawForce.glsl', 'utf8');
 module.exports = DrawForce;
 
 function DrawForce (options) {
-  this.width = options.width || 512;
-  this.height = options.height || 512;
+  this.width = options.width;
+  this.height = options.height;
   this.type = options.type || 'density';
   this.radius = 0.05;
   this.strength = 2.5;
@@ -29,10 +29,8 @@ function DrawForce (options) {
   this.forceApplied = false;
 
   this._program = new Program(shader);
-  var n = this.width;
-  this._frameRenderer = new FrameRenderer(0, 0, n, n, n, n);
-  this.xNeg = false;
-  this.yNeg = false;
+  this._frameRenderer = new FrameRenderer(0, 0, this.width, this.height,
+                                                this.width, this.height);
 
 }
 
@@ -45,22 +43,21 @@ DrawForce.prototype.applyForce = function (normalizedPos) {
   var typeForce = this.force.clone();
   if (this.type === 'velocity') {
     typeForce.x *= this.width;
-    typeForce.y *= this.width;
+    typeForce.y *= this.height;
   }
-
-  this.xNeg = typeForce.x < 0 ? true : false;
-  this.yNeg = typeForce.y < 0 ? true : false;
 
   var value = new Vec4(typeForce.x, typeForce.y, typeForce.z, 1.0);
   glu.enableAlphaBlending();
   this.forceBuffer.bind();
   this._program.use();
   // vert
-  this._program.uniforms.screenSize(new Vec2(512, 512));
+  this._program.uniforms.screenSize(new Vec2(this.width, this.height));
   this._program.uniforms.pixelPosition(new Vec2(0, 0));
-  this._program.uniforms.pixelSize(new Vec2(512, 512));
+  this._program.uniforms.pixelSize(new Vec2(this.width, this.height));
   // frag
   this._program.uniforms.Point(absPos);
+  this._program.uniforms.Width(this.width);
+  this._program.uniforms.Height(this.height);
   this._program.uniforms.Radius(absRadius);
   this._program.uniforms.EdgeSmooth(this.edge);
   this._program.uniforms.Value(value);

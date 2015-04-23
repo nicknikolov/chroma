@@ -26,36 +26,39 @@ uniform sampler2D Pressure;
 uniform sampler2D Divergence;
 uniform sampler2D Obstacle;
 uniform float Alpha;
+uniform float Width;
+uniform float Height;
 varying vec2 tc;
 //	   uniform float InverseBeta = 0.25;
 
 void fTexNeighbors(sampler2D tex, vec2 st,
-    out float left, out float right, out float bottom, out float top) {
-  float texelSize = 1.0 / 512.0;
-  left   = texture2D(tex, st - vec2(1, 0) * texelSize ).x;
-  right  = texture2D(tex, st + vec2(1, 0) * texelSize ).x;
-  bottom = texture2D(tex, st - vec2(0, 1) * texelSize ).x;
-  top    = texture2D(tex, st + vec2(0, 1) * texelSize ).x;
+    out float left, out float right, out float bottom, out float top, vec2 ts) {
+  //float texelSize = 1.0 / 512.0;
+  left   = texture2D(tex, st - vec2(1, 0) / ts ).x;
+  right  = texture2D(tex, st + vec2(1, 0) / ts ).x;
+  bottom = texture2D(tex, st - vec2(0, 1) / ts ).x;
+  top    = texture2D(tex, st + vec2(0, 1) / ts ).x;
 }
 
 void fRoundTexNeighbors(sampler2D tex, vec2 st,
-    out float left, out float right, out float bottom, out float top) {
-  float texelSize = 1.0 / 512.0;
-  left   = ceil(texture2D(tex, st - vec2(1, 0) * texelSize ).x - 0.5);
-  right  = ceil(texture2D(tex, st + vec2(1, 0) * texelSize ).x - 0.5);
-  bottom = ceil(texture2D(tex, st - vec2(0, 1) * texelSize ).x - 0.5);
-  top    = ceil(texture2D(tex, st + vec2(0, 1) * texelSize ).x - 0.5);
+    out float left, out float right, out float bottom, out float top, vec2 ts) {
+  //float texelSize = 1.0 / 512.0;
+  left   = ceil(texture2D(tex, st - vec2(1, 0) / ts ).x - 0.5);
+  right  = ceil(texture2D(tex, st + vec2(1, 0) / ts ).x - 0.5);
+  bottom = ceil(texture2D(tex, st - vec2(0, 1) / ts ).x - 0.5);
+  top    = ceil(texture2D(tex, st + vec2(0, 1) / ts ).x - 0.5);
 }
 
 void main() {
 
+  vec2 texelSize = vec2(Width, Height);
 
   float pL; float pR; float pB; float pT;
-  fTexNeighbors (Pressure, tc, pL, pR, pB, pT);
+  fTexNeighbors (Pressure, tc, pL, pR, pB, pT, texelSize);
   float pC = texture2D(Pressure, tc).x;
 
   float oL; float oR; float oB; float oT;
-  fRoundTexNeighbors (Obstacle, tc, oL, oR, oB, oT);
+  fRoundTexNeighbors (Obstacle, tc, oL, oR, oB, oT, texelSize);
 
   float bC = texture2D(Divergence, tc ).x;
 

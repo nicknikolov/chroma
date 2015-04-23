@@ -20,11 +20,11 @@ var glu = require('pex-glu')
   , SubstractGradientShader = require('./shaders/SubstractGradientShader.js')
   , FrameRenderer = require('./FrameRenderer.js');
 
-function Fluid() {
+function Fluid(simWidth, simHeight, drawWidth, drawHeight) {
 
   // Fluid variables
-  this.width = 512;
-  this.height = 512;
+  this.width = simWidth;
+  this.height = simHeight;
   this.iterations = 20;
   this.speed = 10;
   this.cellSize = 0.5;
@@ -34,17 +34,18 @@ function Fluid() {
   this.maxDensity = 0.9;
   this.maxVelocity = 2.4;
   //-----------------------------
-  var n = this.width;
 
-  this.frameRenderer = new FrameRenderer(0, 0, n, n, n, n);
-  this.screenImage = new ScreenImage(null, 0, 0, n, n, n, n);
+  this.frameRenderer = new FrameRenderer(0, 0, this.width, this.height,
+                                                this.width, this.height);
 
+  this.densityFrameRenderer = new FrameRenderer(0, 0, drawWidth, drawHeight,
+                                                      drawWidth, drawHeight);
   var gl = Context.currentContext;
 
   // Buffers
   this.densityPingPong  = new PingPong({
-    width: this.width
-  , height: this.height
+    width: drawWidth
+  , height: drawHeight
   , fboOpts: { format: gl.RGBA, bpp: 32 }
   });
   this.densityPingPong.clear();
@@ -73,13 +74,13 @@ function Fluid() {
   this.comboObstacleBuffer.unbind();
 
   // Shaders
-  this.clampLengthShader = new ClampLengthShader();
-  this.advectShader = new AdvectShader();
-  this.diffuseShader = new DiffuseShader();
-  this.divergenceShader = new DivergenceShader();
-  this.jacobiShader = new JacobiShader();
-  this.addForceShader = new AddForceShader();
-  this.substractGradientShader = new SubstractGradientShader();
+  this.clampLengthShader = new ClampLengthShader(this.width, this.height);
+  this.advectShader = new AdvectShader(this.width, this.height);
+  this.diffuseShader = new DiffuseShader(this.width, this.height);
+  this.divergenceShader = new DivergenceShader(this.width, this.height);
+  this.jacobiShader = new JacobiShader(this.width, this.height);
+  this.addForceShader = new AddForceShader(this.width, this.height);
+  this.substractGradientShader = new SubstractGradientShader(this.width, this.height);
 
 }
 
@@ -92,7 +93,7 @@ Fluid.prototype.addDensity = function (options) {
   , backBufferTex: this.densityPingPong.sourceBuffer.getColorAttachment(0)
   , addTex: texture
   , force: strength
-  , frameRenderer: this.frameRenderer
+  , frameRenderer: this.densityFrameRenderer
   });
   this.densityPingPong.swap();
 }
@@ -100,16 +101,12 @@ Fluid.prototype.addDensity = function (options) {
 Fluid.prototype.addVelocity = function (options) {
   var texture = options.texture;
   var strength = options.strength;
-  var xNeg = options.xNeg || false;
-  var yNeg = options.yNeg || false;
   glu.enableBlending(false);
   this.addForceShader.update({
     destBuffer: this.velocityPingPong.destBuffer
   , backBufferTex: this.velocityPingPong.sourceBuffer.getColorAttachment(0)
   , addTex: texture
   , force: strength
-  , xNeg: xNeg
-  , yNeh: yNeg
   , frameRenderer: this.frameRenderer
   });
   this.velocityPingPong.swap();
@@ -129,7 +126,7 @@ Fluid.prototype.iterate = function () {
     , backBufferTex: this.densityPingPong.sourceBuffer.getColorAttachment(0)
     , max: this.maxDensity
     , clampForce: this.clampForce
-    , frameRenderer: this.frameRenderer
+    , frameRenderer: this.densityFrameRenderer
     });
     this.densityPingPong.swap();
   }
@@ -165,7 +162,8 @@ Fluid.prototype.iterate = function () {
   , timeStep: this.timeStep
   , dissipation: 1.0 - this.dissipation
   , cellSize: this.cellSize
-  , frameRenderer: this.frameRenderer
+  , frameRenderer: this.densityFrameRenderer
+  , type: 'density'
   });
   this.densityPingPong.swap();
 
@@ -231,14 +229,6 @@ Fluid.prototype.iterate = function () {
 
   return this.densityPingPong.destBuffer.getColorAttachment(0);
 
-}
-
-Fluid.prototype.draw = function() {
-  //this.screenImage.draw(this.velocityPingPong.destBuffer.getColorAttachment(0), this.show);
-  //this.screenImage.draw(this.densityPingPong.destBuffer.getColorAttachment(0), this.show);
-  var gl = Context.currentContext;
-  this.screenImage.setImage(this.densityPingPong.destBuffer.getColorAttachment(0));
-  this.screenImage.draw();
 }
 
 module.exports = Fluid;

@@ -5,7 +5,9 @@ var glu = require('pex-glu')
   , Vec2 = require('pex-geom').Vec2
   , shader = fs.readFileSync(__dirname + '/addForce.glsl', 'utf8');
 
-function AddForceShader () {
+function AddForceShader (width, height) {
+  this.width = width || 512;
+  this.height = height || 512;
   this._program = new Program(shader);
   this._program.use();
 }
@@ -15,8 +17,6 @@ AddForceShader.prototype.update = function (options) {
     , backBufferTex = options.backBufferTex
     , addTex = options.addTex
     , force = options.force
-    , xNeg = options.xNeg || false
-    , yNeg = options.yNeg || false
     , frameRenderer = options.frameRenderer;
 
   if (!destBuffer) throw new Error("no destBuffer");
@@ -28,17 +28,18 @@ AddForceShader.prototype.update = function (options) {
   destBuffer.bind();
   this._program.use();
   //vert
-  this._program.uniforms.screenSize(new Vec2(512, 512));
+  this._program.uniforms.screenSize(new Vec2(this.width, this.height));
   this._program.uniforms.pixelPosition(new Vec2(0, 0));
-  this._program.uniforms.pixelSize(new Vec2(512, 512));
+  this._program.uniforms.pixelSize(new Vec2(this.width, this.height));
   //frag
   backBufferTex.bind(0);
   this._program.uniforms.Backbuffer(0);
   addTex.bind(1);
   this._program.uniforms.AddTexture(1);
   this._program.uniforms.force(force);
-  //this._program.uniforms.xNeg(xNeg);
-  //this._program.uniforms.yNeg(yNeg);
+  var scale = new Vec2(addTex.width / destBuffer.width,
+                        addTex.height / destBuffer.height);
+  this._program.uniforms.Scale(scale);
   frameRenderer.draw(this._program);
   destBuffer.unbind();
 

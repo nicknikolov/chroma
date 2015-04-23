@@ -23,11 +23,12 @@ var Vec4 = geom.Vec4;
 var DisplacedMatCap = require('./materials/DisplacedMatCap');
 var Fluid = require('./fluid/fluid');
 var DrawForce = require('./fluid/DrawForce');
+var ScreenImage = glu.ScreenImage;
 
 sys.Window.create({
   settings: {
-    width: 512,
-    height: 512,
+    width: 512 ,
+    height: 512 ,
     type: '3d',
     fullscreen: Platform.isBrowser ? true : false
   },
@@ -41,7 +42,62 @@ sys.Window.create({
     var planeSize = 2;
     var numSteps = 200;
     var plane = new Plane(planeSize, planeSize, numSteps, numSteps, 'x', 'z');
-    this.fluid = new Fluid();
+    var simWidth = 512;
+    var simHeight = 512;
+    this.fluid = new Fluid(simWidth, simHeight, this.width, this.height);
+    this.screenImage = new ScreenImage(null, 0, 0, this.width, this.height,
+                                                    this.width, this.height);
+    this.lastMouse = new Vec2(0, 0);
+
+    this.drawVelocityForce = new DrawForce({
+      width:  simWidth
+    , height: simHeight
+    , type: 'velocity'
+    });
+
+    this.drawVelocityForce.strength = 2.9;
+    this.drawVelocityForce.radius = 0.05;
+
+    this.drawDensityForce = new DrawForce({
+      width:  this.width
+    , height: this.height
+    , type: 'density'
+    });
+
+    this.drawDensityForce.strength = 0.5;
+    this.drawDensityForce.radius = 0.05;
+
+
+    this.on('mouseMoved', function (e) {
+      var mouse = new Vec2();
+      mouse.x = e.x / this.width;
+      mouse.y = (this.height - e.y) / this.height;
+      this.lastMouse.x = mouse.x;
+      this.lastMouse.y = mouse.y;
+    });
+
+    this.on('mouseDown', function(e) {
+      this.drawDensityForce.clear();
+      this.drawVelocityForce.clear();
+    }.bind(this));
+
+    this.on('mouseDragged', function(e) {
+      var mouse = new Vec2();
+
+      mouse.x = e.x / this.width;
+      mouse.y = (this.height - e.y) / this.height;
+
+      var velocity = mouse.dup().sub(this.lastMouse);
+      var vec = new Vec3(velocity.x, velocity.y, 0);
+
+      this.drawVelocityForce.force = vec.clone();
+      this.drawVelocityForce.applyForce(mouse);
+      this.drawDensityForce.applyForce(mouse);
+
+      this.lastMouse.x = mouse.x;
+      this.lastMouse.y = mouse.y;
+
+    });
     this.textures = [
       Texture2D.load('assets/chroma.jpg')
     , Texture2D.load('assets/plastic_red.jpg')
@@ -102,56 +158,6 @@ sys.Window.create({
       }
     }.bind(this));
 
-    this.drawVelocityForce = new DrawForce({
-      width: this.width
-    , height: this.height
-    , type: 'velocity'
-    });
-
-    this.drawVelocityForce.strength = 2.9;
-    this.drawVelocityForce.radius = 0.05;
-
-    this.drawDensityForce = new DrawForce({
-      width: this.width
-    , height: this.height
-    , type: 'density'
-    });
-
-    this.drawDensityForce.strength = 0.5;
-    this.drawDensityForce.radius = 0.05;
-
-    this.lastMouse = new Vec2(0, 0);
-
-    this.on('mouseMoved', function (e) {
-      var mouse = new Vec2();
-      mouse.x = e.x / this.width;
-      mouse.y = (this.height - e.y) / this.height;
-      this.lastMouse.x = mouse.x;
-      this.lastMouse.y = mouse.y;
-    });
-
-    this.on('mouseDown', function(e) {
-      this.drawDensityForce.clear();
-      this.drawVelocityForce.clear();
-    }.bind(this));
-
-    this.on('mouseDragged', function(e) {
-      var mouse = new Vec2();
-
-      mouse.x = e.x / this.width;
-      mouse.y = (this.height - e.y) / this.height;
-
-      var velocity = mouse.dup().sub(this.lastMouse);
-      var vec = new Vec3(velocity.x, velocity.y, 0);
-
-      this.drawVelocityForce.force = vec.clone();
-      this.drawVelocityForce.applyForce(mouse);
-      this.drawDensityForce.applyForce(mouse);
-
-      this.lastMouse.x = mouse.x;
-      this.lastMouse.y = mouse.y;
-
-    });
 
     this.gui.addTexture2D('Velocity', this.drawVelocityForce.forceBuffer.getColorAttachment(0))
     this.gui.addTexture2D('Density', this.drawDensityForce.forceBuffer.getColorAttachment(0))
@@ -182,14 +188,14 @@ sys.Window.create({
         this.fluid.addVelocity({
           texture: this.drawVelocityForce.forceBuffer.getColorAttachment(0)
         , strength: velocityStrength
-        , xNeg: this.drawVelocityForce.xNeg
-        , yNeg: this.drawVelocityForce.yNeg
         });
       }
 
       var fluidTexture = this.fluid.iterate();
       glu.clearColorAndDepth(Color.Black);
-      this.fluid.draw();
+      //this.fluid.draw();
+      this.screenImage.setImage(fluidTexture);
+      this.screenImage.draw();
 
       //this.fluid.screenImage.draw(this.fluid.densityPingPong.destBuffer.getColorAttachment(0), this.show);
 
@@ -227,8 +233,6 @@ sys.Window.create({
   this.gui.draw();
 
       //if (this.debug) this.meshWireframe.draw(this.camera);
-
-
 
     } catch (e) {
       console.log(e.stack);
