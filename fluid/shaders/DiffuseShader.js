@@ -1,9 +1,9 @@
-var glu = require('pex-glu')
-  , Context = glu.Context
-  , Program = glu.Program
-  , fs = require('fs')
-  , shader  = fs.readFileSync(__dirname + '/diffuse.glsl', 'utf8')
-  , Vec2 = require('pex-geom').Vec2;
+var glu = require('pex-glu');
+var Context = glu.Context;
+var Program = glu.Program;
+var fs = require('fs');
+var shader  = fs.readFileSync(__dirname + '/diffuse.glsl', 'utf8');
+var Vec2 = require('pex-geom').Vec2;
 
 function DiffuseShader (width, height) {
   this.width = width || 512;

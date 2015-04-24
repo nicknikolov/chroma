@@ -1,9 +1,9 @@
-var glu = require('pex-glu')
-  , Context = glu.Context
-  , Program = glu.Program
-  , fs = require('fs')
-  , Vec2 = require('pex-geom').Vec2
-  , shader = fs.readFileSync(__dirname + '/addForce.glsl', 'utf8');
+var glu = require('pex-glu');
+var Context = glu.Context;
+var Program = glu.Program;
+var fs = require('fs');
+var Vec2 = require('pex-geom').Vec2;
+var shader = fs.readFileSync(__dirname + '/addForce.glsl', 'utf8');
 
 function AddForceShader (width, height) {
   this.width = width;

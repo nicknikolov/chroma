@@ -1,24 +1,24 @@
-var glu = require('pex-glu')
-  , Context = glu.Context
-  , Program = glu.Program
-  , FBO = glu.RenderTarget
-  , Texture2D = glu.Texture2D
-  , ScreenImage = glu.ScreenImage
-  , Color = require('pex-color').Color
-  , Material = require('../pex-hacks/Material.js')
-  , merge = require('merge')
-  , sys = require('pex-sys')
-  , fs = require('fs')
-  , PingPong = require('./PingPong.js')
-  //Shaders
-  , AdvectShader = require('./shaders/AdvectShader.js')
-  , ClampLengthShader = require('./shaders/ClampLengthShader.js')
-  , DiffuseShader = require('./shaders/DiffuseShader.js')
-  , DivergenceShader = require('./shaders/DivergenceShader.js')
-  , JacobiShader = require('./shaders/JacobiShader.js')
-  , AddForceShader = require('./shaders/AddForceShader.js')
-  , SubstractGradientShader = require('./shaders/SubstractGradientShader.js')
-  , FrameRenderer = require('./FrameRenderer.js');
+var glu = require('pex-glu');
+var Context = glu.Context;
+var Program = glu.Program;
+var FBO = glu.RenderTarget;
+var Texture2D = glu.Texture2D;
+var ScreenImage = glu.ScreenImage;
+var Color = require('pex-color').Color;
+var Material = require('../pex-hacks/Material.js');
+var merge = require('merge');
+var sys = require('pex-sys');
+var fs = require('fs');
+var PingPong = require('./PingPong.js');
+//Shaders
+var AdvectShader = require('./shaders/AdvectShader.js');
+var ClampLengthShader = require('./shaders/ClampLengthShader.js');
+var DiffuseShader = require('./shaders/DiffuseShader.js');
+var DivergenceShader = require('./shaders/DivergenceShader.js');
+var JacobiShader = require('./shaders/JacobiShader.js');
+var AddForceShader = require('./shaders/AddForceShader.js');
+var SubstractGradientShader = require('./shaders/SubstractGradientShader.js');
+var FrameRenderer = require('./FrameRenderer.js');
 
 function Fluid(simWidth, simHeight, drawWidth, drawHeight) {
 

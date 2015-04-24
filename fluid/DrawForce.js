@@ -1,12 +1,12 @@
-var Program = require('pex-glu').Program
-  , FBO = require('pex-glu').RenderTarget
-  , FrameRenderer = require('./FrameRenderer')
-  , Color = require('pex-color').Color
-  , Vec2 = require('pex-geom').Vec2
-  , Vec3 = require('pex-geom').Vec3
-  , Vec4 = require('pex-geom').Vec4
-  , fs = require('fs')
-  , glu = require('pex-glu');
+var Program = require('pex-glu').Program;
+var FBO = require('pex-glu').RenderTarget;
+var FrameRenderer = require('./FrameRenderer');
+var Color = require('pex-color').Color;
+var Vec2 = require('pex-geom').Vec2;
+var Vec3 = require('pex-geom').Vec3;
+var Vec4 = require('pex-geom').Vec4;
+var fs = require('fs');
+var glu = require('pex-glu');
 
 var shader = fs.readFileSync(__dirname + '/drawForce.glsl', 'utf8');
 

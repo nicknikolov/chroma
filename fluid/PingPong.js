@@ -1,5 +1,5 @@
-var glu = require('pex-glu')
-  , FBO = glu.RenderTarget
+var glu = require('pex-glu');
+var FBO = glu.RenderTarget;
 
 function PingPong (options) {
   var options = options || {};

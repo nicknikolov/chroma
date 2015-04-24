@@ -20,290 +20,1040 @@ var GUI = gui.GUI;
 var Texture2D = glu.Texture2D;
 var Vec2 = geom.Vec2;
 var Vec3 = geom.Vec3;
+var Vec4 = geom.Vec4;
 var DisplacedMatCap = require('./materials/DisplacedMatCap');
-var RenderTarget = glu.RenderTarget;
-var ScreenImage = glu.ScreenImage;
 var Fluid = require('./fluid/fluid');
+var DrawForce = require('./fluid/DrawForce');
+var ScreenImage = glu.ScreenImage;
 
 sys.Window.create({
-    settings: {
-        width: 1280,
-        height: 720,
-        type: '3d',
-        fullscreen: Platform.isBrowser ? true : false
-    },
-    debug: false,
-    displacementHeight: 0.15,
-    textures: [],
-    displacementMaps: [],
-    currentTexture: 0,
-    currentDisplacementMap: 0,
-    showNormals: false,
-    init: function() {
-        var planeSize = 2;
-        var numSteps = 200;
-        var plane = new Plane(planeSize, planeSize, numSteps, numSteps, 'x', 'z');
-        this.textures = [
-            Texture2D.load('assets/plastic_red.jpg'),
-            Texture2D.load('assets/Blue Mirror.png'),
-            Texture2D.load('assets/ok_ochre_oil.jpg'),
-            Texture2D.load('assets/SebcesoirGold1.jpg'),
-            Texture2D.load('assets/Steel-Brushed.png'),
-            Texture2D.load('assets/IronCast.png'),
-        ];
-        this.displacementMaps = [
-            Texture2D.load('assets/noiseTwirl.png'),
-            Texture2D.load('assets/noise.png'),
-            Texture2D.load('assets/noiseSmooth.png'),
-        ];
-        this.mesh = new Mesh(plane, new DisplacedMatCap({
-            texture: this.textures[0],
-            displacementMap: this.displacementMaps[0],
-            tint: Color.Black,
-            displacementHeight: this.displacementHeight,
-            textureSize: new Vec2(512, 512),
-            planeSize: new Vec2(planeSize, planeSize),
-            numSteps: numSteps
-        }));
-        this.meshWireframe = new Mesh(plane, new DisplacedMatCap({
-            texture: this.textures[0],
-            displacementMap: this.displacementMaps[0],
-            tint: Color.Yellow,
-            displacementHeight: this.displacementHeight,
-            textureSize: new Vec2(512, 512),
-            planeSize: new Vec2(planeSize, planeSize),
-            numSteps: numSteps
-        }), { lines: true });
-        this.meshWireframe.position.z = 0.001;
+  settings: {
+    width: 1280,
+    height: 720 ,
+    type: '3d',
+    fullscreen: Platform.isBrowser ? true : false
+  },
+  debug:                  true,
+  displacementHeight:     0.105,
+  textures:               [],
+  currentTexture:         0,
+  showNormals:            false,
 
-        this.gui = new GUI(this);
-        this.gui.addParam('Debug \'d\'', this, 'debug');
-        this.gui.addParam('Show normals \'n\'', this, 'showNormals');
-        this.gui.addParam('displacementHeight', this, 'displacementHeight');
-        this.gui.addTextureList('Material', this, 'currentTexture',
-                this.textures.map(function(tex, i) {
-                    return {
-                        texture: tex,
-                        name: 'Tex' + i,
-                        value: i
-                    }
-                }))
-        this.gui.addTextureList('Displacement maps', this,
-                'currentDisplacementMap',
-                this.displacementMaps.map(function(tex, i) {
-                    return {
-                        texture: tex,
-                        name: 'Tex' + i,
-                        value: i
-                    }
-                }))
+  init: function() {
+    var planeSize = 2;
+    var numSteps = 200;
+    var plane = new Plane(planeSize, planeSize, numSteps, numSteps, 'x', 'y');
+    var simWidth = this.width/4;
+    var simHeight = this.height/4;
+    this.fluid = new Fluid(simWidth, simHeight, this.width, this.height);
+    this.screenImage = new ScreenImage(null, 0, 0, this.width, this.height,
+                                                    this.width, this.height);
+    this.lastMouse = new Vec2(0, 0);
 
-        this.camera = new PerspectiveCamera(60, this.width / this.height);
-        this.arcball = new Arcball(this, this.camera);
-        this.arcball.setPosition(new Vec3(0, 1.5, 1.5))
+    this.drawVelocityForce = new DrawForce({
+      width:  this.width
+    , height: this.height
+    , type: 'velocity'
+    });
 
-        this.on('keyDown', function(e) {
-            if (e.str == 'd') {
-                this.debug = !this.debug;
-                this.gui.items[0].dirty = true;
-            }
-            if (e.str == 'n') {
-                this.showNormals = !this.showNormals;
-                this.gui.items[0].dirty = true;
-            }
-        }.bind(this));
+    this.drawVelocityForce.strength = 4.2;
+    this.drawVelocityForce.radius = 0.08;
 
-        var pixels = [];
-        var n = 512;
-        var T = 0;
-        for(var i = 0; i<n; i++)
-          for(var j = 0; j<n; j++){
-            T = 0.0;
-            if (j>150 && j<350){
-              if (i>100 && i<150) T=.005;
-              else if (i>350 && i<400) T= -.005;
-            }
-            pixels.push( 0, 0, T, 0 );
-          }
+    this.drawDensityForce = new DrawForce({
+      width:  this.width
+    , height: this.height
+    , type: 'density'
+    });
 
-        var pixels2 = [];
-        for(var i = 0; i<n; i++)
-          for(var j = 0; j<n; j++){
-            T = 0;
-            if (i>200 && i<300){
-              if (j>100 && j<240) T=1;
-              else if (j>260 && j<400) T= -1;
-            }
-            pixels2.push( 0, 0, T, 0 );
-          }
-        var b = new ArrayBuffer(n * n * 32);
-        var pixelsData = new Float32Array(b);
-        for(var i=0; i<pixels.length; i++) {
-            pixelsData[i] = pixels[i];
-        }
-        var gl = this.gl;
-        var texture2 = this.texture2 = Texture2D.create(n, n, { bpp: 32, nearest: true });
-        texture2.bind();
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, n, n, 0, gl.RGBA, gl.FLOAT, pixelsData);
+    this.drawDensityForce.strength = 2.7;
+    this.drawDensityForce.radius = 0.03;
 
-        var b2 = new ArrayBuffer(n * n * 32);
-        var pixelsData2 = new Float32Array(b2);
-        for(var i=0; i<pixels2.length; i++) {
-            pixelsData2[i] = pixels2[i];
-        }
-        var texture = this.texture = Texture2D.create(n, n, { bpp: 32, nearest: true });
-        texture.bind();
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, n, n, 0, gl.RGBA, gl.FLOAT, pixelsData2);
 
-        var texture1 = this.texture1 = Texture2D.create(n, n, { bpp: 32, nearest: true });
-        texture1.bind();
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, n, n, 0, gl.RGBA, gl.FLOAT, pixelsData2);
+    this.on('mouseMoved', function (e) {
+      var mouse = new Vec2();
+      mouse.x = e.x / this.width;
+      mouse.y = (this.height - e.y) / this.height;
+      this.lastMouse.x = mouse.x;
+      this.lastMouse.y = mouse.y;
+    });
 
-        texture.name = 'texture';
-        texture1.name = 'texture1';
-        texture2.name = 'texture2';
+    this.on('mouseDown', function(e) {
+      this.drawDensityForce.clear();
+      this.drawVelocityForce.clear();
+    }.bind(this));
 
-        this.fbo = new RenderTarget(n, n, { color: texture });
-        this.fbo1 = new RenderTarget(n, n, { color: texture1 });
-        this.fluid = new Fluid();
-        this.screenImage = new ScreenImage(null, 0, 0, n, n, n, n);
-    },
-    draw: function() {
-        try {
-            //disable depth test
-            glu.enableDepthReadAndWrite(false, false);
-            glu.viewport(0, 0, this.fbo.width, this.fbo.height);
-            this.fluid.iterate(this.screenImage, this.fbo, this.fbo1, this.texture2);
-            glu.viewport(0, 0, this.width, this.height);
-            glu.clearColorAndDepth(Color.Grey);
+    this.on('mouseDragged', function(e) {
+      var mouse = new Vec2();
 
-            this.screenImage.draw(this.fbo.getColorAttachment(), this.fluid.show)
+      mouse.x = e.x / this.width;
+      mouse.y = (this.height - e.y) / this.height;
 
-            glu.clearDepth();
-            glu.enableDepthReadAndWrite(true);
+      var velocity = mouse.dup().sub(this.lastMouse);
+      var vec = new Vec3(velocity.x, velocity.y, 0);
 
-            this.mesh.material.uniforms.showNormals = this.showNormals;
-            this.mesh.material.uniforms.displacementHeight = this.displacementHeight;
-            this.mesh.material.uniforms.texture = this.textures[this.currentTexture];
-            this.mesh.material.uniforms.time = sys.Time.seconds;
-            this.mesh.material.uniforms.displacementMap = this.fbo.getColorAttachment(0);
+      this.drawVelocityForce.force = vec.clone();
+      this.drawVelocityForce.applyForce(mouse);
+      this.drawDensityForce.applyForce(mouse);
 
-            this.meshWireframe.material.uniforms.showNormals = this.showNormals;
-            this.meshWireframe.material.uniforms.displacementHeight = this.displacementHeight;
-            this.meshWireframe.material.texture = this.textures[this.currentTexture];
-            this.meshWireframe.material.uniforms.time = sys.Time.seconds;
-            this.meshWireframe.material.uniforms.displacementMap = this.fbo.getColorAttachment(0);
+      this.lastMouse.x = mouse.x;
+      this.lastMouse.y = mouse.y;
 
-            //this.fbo1.bind();
-            //this.screenImage.draw(this.tex1);
-            //this.fbo1.unbind();
+    });
+    this.textures = [
+      Texture2D.load('assets/chroma.jpg')
+    , Texture2D.load('assets/plastic_red.jpg')
+    , Texture2D.load('assets/Blue Mirror.png')
+    , Texture2D.load('assets/ok_ochre_oil.jpg')
+    , Texture2D.load('assets/SebcesoirGold1.jpg')
+    , Texture2D.load('assets/Steel-Brushed.png')
+    , Texture2D.load('assets/IronCast.png')
+    ];
 
-            glu.enableDepthReadAndWrite(true, true);
-            this.mesh.draw(this.camera);
-            if (this.debug) {
-                //this.meshWireframe.draw(this.camera);
-            }
+    this.mesh = new Mesh(plane, new DisplacedMatCap({
+      texture:            this.textures[2],
+      tint:               Color.Black,
+      displacementHeight: this.displacementHeight,
+      textureSize:        new Vec2(512, 512),
+      planeSize:          new Vec2(planeSize, planeSize),
+      numSteps:           numSteps,
+    }));
 
-            this.gui.draw();
-        } catch (e) {
-            console.log(e.stack);
-            this.draw = function(){};
-        }
+
+    this.meshWireframe = new Mesh(plane, new DisplacedMatCap({
+      texture:            this.textures[2],
+      tint:               Color.Yellow,
+      displacementHeight: this.displacementHeight,
+      textureSize:        new Vec2(512, 512),
+      planeSize:          new Vec2(planeSize, planeSize),
+      numSteps:           numSteps
+    }), { lines: true });
+
+    this.meshWireframe.position.z = 0.001;
+
+    this.gui = new GUI(this);
+    this.gui.addParam('Debug \'d\'', this, 'debug');
+    this.gui.addParam('Show normals \'n\'', this, 'showNormals');
+    this.gui.addParam('displacementHeight', this, 'displacementHeight');
+    this.gui.addParam('iterations', this.fluid, 'iterations', {min: 0, max:50});
+    //this.gui.addTextureList('Material', this, 'currentTexture',
+    //    this.textures.map(function(tex, i) {
+    //      return {
+    //        texture: tex,
+    //        name: 'Tex' + i,
+    //        value: i
+    //      }
+    //    }));
+
+    this.camera = new PerspectiveCamera(90, this.width / this.height);
+    this.camera.setPosition(new Vec3(0, 1.5, 1.0));
+//    this.arcball = new Arcball(this, this.camera);
+//    this.arcball.setPosition(new Vec3(0, 1.5, 1.5));
+
+    this.on('keyDown', function(e) {
+      if (e.str == 'd') {
+        this.debug = !this.debug;
+        this.gui.items[0].dirty = true;
+      }
+      if (e.str == 'n') {
+        this.showNormals = !this.showNormals;
+        this.gui.items[0].dirty = true;
+      }
+    }.bind(this));
+
+
+    this.gui.addTexture2D('Velocity', this.drawVelocityForce.forceBuffer.getColorAttachment(0))
+    this.gui.addTexture2D('Density', this.drawDensityForce.forceBuffer.getColorAttachment(0))
+  },
+  draw: function() {
+    try {
+      //disable depth test
+      glu.enableDepthReadAndWrite(false, false);
+
+      this.drawDensityForce.update();
+      if (this.drawDensityForce.forceChanged) {
+        this.drawDensityForce.forceChanged = false;
+        var densityStrength = this.drawDensityForce.strength * sys.Time.delta;
+        this.fluid.addDensity({
+          texture: this.drawDensityForce.forceBuffer.getColorAttachment(0)
+        , strength: densityStrength
+        });
+      }
+
+      this.drawVelocityForce.update();
+      if (this.drawVelocityForce.forceChanged) {
+        this.drawVelocityForce.forceChanged = false;
+        var velocityStrength = this.drawVelocityForce.strength * sys.Time.delta;
+        this.fluid.addVelocity({
+          texture: this.drawVelocityForce.forceBuffer.getColorAttachment(0)
+        , strength: velocityStrength
+        });
+      }
+
+      var fluidTexture = this.fluid.iterate();
+      glu.clearColorAndDepth(Color.Black);
+      glu.viewport(0, 0, this.width, this.height);
+      this.screenImage.setImage(fluidTexture);
+      this.screenImage.draw();
+
+      glu.clearDepth();
+      glu.enableDepthReadAndWrite(true);
+
+      this.mesh.material.uniforms.
+        showNormals         = this.showNormals;
+      this.mesh.material.uniforms.
+        displacementHeight  = this.displacementHeight;
+      this.mesh.material.uniforms.
+        texture             = this.textures[this.currentTexture];
+      this.mesh.material.uniforms.
+        time                = sys.Time.seconds;
+      this.mesh.material.uniforms.
+        displacementMap     = fluidTexture;
+
+      this.meshWireframe.material.uniforms.
+        showNormals         = this.showNormals;
+      this.meshWireframe.material.uniforms.
+        displacementHeight  = this.displacementHeight;
+      this.meshWireframe.material.
+        texture             = this.textures[this.currentTexture];
+      this.meshWireframe.material.uniforms.
+        time                = sys.Time.seconds;
+      this.meshWireframe.material.uniforms.
+        displacementMap     = fluidTexture;
+
+
+      glu.enableDepthReadAndWrite(false, false);
+      glu.enableAdditiveBlending(true);
+      //this.mesh.draw(this.camera);
+
+      glu.clearDepth();
+      this.gui.draw();
+
+      //if (this.debug) this.meshWireframe.draw(this.camera);
+
+    } catch (e) {
+      console.log(e.stack);
+      this.draw = function(){};
     }
+  }
 });
 
-},{"./fluid/fluid":2,"./materials/DisplacedMatCap":3,"pex-color":8,"pex-gen":11,"pex-geom":26,"pex-glu":44,"pex-gui":60,"pex-materials":65,"pex-sys":82}],2:[function(require,module,exports){
-//http://www.clicktorelease.com/blog/creating-spherical-environment-mapping-shader
+},{"./fluid/DrawForce":2,"./fluid/fluid":5,"./materials/DisplacedMatCap":13,"pex-color":18,"pex-gen":21,"pex-geom":36,"pex-glu":54,"pex-gui":70,"pex-materials":75,"pex-sys":92}],2:[function(require,module,exports){
+var Program = require('pex-glu').Program;
+var FBO = require('pex-glu').RenderTarget;
+var FrameRenderer = require('./FrameRenderer');
+var Color = require('pex-color').Color;
+var Vec2 = require('pex-geom').Vec2;
+var Vec3 = require('pex-geom').Vec3;
+var Vec4 = require('pex-geom').Vec4;
 
 var glu = require('pex-glu');
-var color = require('pex-color');
-var Context = glu.Context;
-var Material = glu.Material;
-var Program = glu.Program;
-var Color = color.Color;
-var merge = require('merge');
 
+var shader = "#ifdef VERT\n\nattribute vec2 position;\nattribute vec2 texCoord;\nuniform vec2 screenSize;\nuniform vec2 pixelPosition;\nuniform vec2 pixelSize;\nvarying vec2 tc;\n\nvoid main() {\n  float tx = position.x * 0.5 + 0.5; //-1 -> 0, 1 -> 1\n  float ty = -position.y * 0.5 + 0.5; //-1 -> 1, 1 -> 0\n  //(x + 0)/sw * 2 - 1, (x + w)/sw * 2 - 1\n  float x = (pixelPosition.x + pixelSize.x * tx)/screenSize.x * 2.0 - 1.0;  //0 -> -1, 1 -> 1\n  //1.0 - (y + h)/sh * 2, 1.0 - (y + h)/sh * 2\n  float y = 1.0 - (pixelPosition.y + pixelSize.y * ty)/screenSize.y * 2.0;  //0 -> 1, 1 -> -1\n  gl_Position = vec4(x, y, 0.0, 1.0);\n  tc = texCoord;\n}\n\n#endif\n\n#ifdef FRAG\n\nuniform vec2 Point;\nuniform float\tRadius;\nuniform float\tEdgeSmooth;\nuniform vec4 Value;\nuniform float Width;\nuniform float Height;\nvarying vec2 tc;\n\nvoid main(){\n  vec2 texelSize = vec2(Width, Height);\n  vec2 tcs = tc * texelSize;\n  vec4 color = Value;\n  float d = distance(Point, tcs);\n  float a = max((Radius - d) / Radius, 0.0);\n  float c = ceil(a);\n  color.xyz *= c;\n  color.w *= pow(a, EdgeSmooth + 0.1);\n  gl_FragColor = color;\n}\n\n#endif\n\n";
 
-var vertex  = "attribute vec2 aPos;\nattribute vec2 aTexCoord;\nvarying   vec2 tc;\nvoid main(void) {\n   gl_Position = vec4(aPos, 0., 1.);\n   tc = aTexCoord;\n}\n";
-var source  = "#ifdef VERT\n\nattribute vec2 position;\nattribute vec2 texCoord;\nuniform vec2 screenSize;\nuniform vec2 pixelPosition;\nuniform vec2 pixelSize;\nvarying vec2 tc;\n\nvoid main() {\n  float tx = position.x * 0.5 + 0.5; //-1 -> 0, 1 -> 1\n  float ty = -position.y * 0.5 + 0.5; //-1 -> 1, 1 -> 0\n  //(x + 0)/sw * 2 - 1, (x + w)/sw * 2 - 1\n  float x = (pixelPosition.x + pixelSize.x * tx)/screenSize.x * 2.0 - 1.0;  //0 -> -1, 1 -> 1\n  //1.0 - (y + h)/sh * 2, 1.0 - (y + h)/sh * 2\n  float y = 1.0 - (pixelPosition.y + pixelSize.y * ty)/screenSize.y * 2.0;  //0 -> 1, 1 -> -1\n  gl_Position = vec4(x, y, 0.0, 1.0);\n  tc = texCoord;\n}\n\n#endif\n\n\n#ifdef FRAG\n\nuniform sampler2D image;\nuniform sampler2D image2;\nvarying vec2 tc;\n\n//precision highp float;\nvarying float S;\nvoid main(void) {\n    vec4 t = texture2D(image, tc);\n    t.b += texture2D(image2, tc).b;\n    gl_FragColor = t;\n}\n\n#endif\n";
-var advec   = "#ifdef VERT\n\nattribute vec2 position;\nattribute vec2 texCoord;\nuniform vec2 screenSize;\nuniform vec2 pixelPosition;\nuniform vec2 pixelSize;\nvarying vec2 tc;\n\nvoid main() {\n  float tx = position.x * 0.5 + 0.5; //-1 -> 0, 1 -> 1\n  float ty = -position.y * 0.5 + 0.5; //-1 -> 1, 1 -> 0\n  //(x + 0)/sw * 2 - 1, (x + w)/sw * 2 - 1\n  float x = (pixelPosition.x + pixelSize.x * tx)/screenSize.x * 2.0 - 1.0;  //0 -> -1, 1 -> 1\n  //1.0 - (y + h)/sh * 2, 1.0 - (y + h)/sh * 2\n  float y = 1.0 - (pixelPosition.y + pixelSize.y * ty)/screenSize.y * 2.0;  //0 -> 1, 1 -> -1\n  gl_Position = vec4(x, y, 0.0, 1.0);\n  tc = texCoord;\n}\n\n#endif\n\n#ifdef FRAG\n\nuniform sampler2D image;\nvarying vec2 tc;\n\nconst float h = 1./512., dt = .001, tau = .5*dt/h;\nvoid main(void) {\n    vec2 D = -tau*vec2(\n            texture2D(image, tc).r + texture2D(image, vec2(tc.r - h, tc.g)).r,\n            texture2D(image, tc).g + texture2D(image, vec2(tc.r, tc.g - h)).g );\n    vec2 Df = floor(D),   Dd = D - Df;\n    vec2 tc1 = tc + Df*h;\n    vec3 new =  \n        (texture2D(image, tc1).rgb*(1. - Dd.g) +\n         texture2D(image, vec2(tc1.r, tc1.g + h)).rgb*Dd.g)*(1. - Dd.r) +\n        (texture2D(image, vec2(tc1.r + h, tc1.g)).rgb*(1. - Dd.g) +\n         texture2D(image, vec2(tc1.r + h, tc1.g + h)).rgb*Dd.g)*Dd.r;\n    gl_FragColor = vec4( new, texture2D(image, tc).a );\n}\n\n#endif";
-var div     = "#ifdef VERT\n\nattribute vec2 position;\nattribute vec2 texCoord;\nuniform vec2 screenSize;\nuniform vec2 pixelPosition;\nuniform vec2 pixelSize;\nvarying vec2 tc;\n\nvoid main() {\n  float tx = position.x * 0.5 + 0.5; //-1 -> 0, 1 -> 1\n  float ty = -position.y * 0.5 + 0.5; //-1 -> 1, 1 -> 0\n  //(x + 0)/sw * 2 - 1, (x + w)/sw * 2 - 1\n  float x = (pixelPosition.x + pixelSize.x * tx)/screenSize.x * 2.0 - 1.0;  //0 -> -1, 1 -> 1\n  //1.0 - (y + h)/sh * 2, 1.0 - (y + h)/sh * 2\n  float y = 1.0 - (pixelPosition.y + pixelSize.y * ty)/screenSize.y * 2.0;  //0 -> 1, 1 -> -1\n  gl_Position = vec4(x, y, 0.0, 1.0);\n  tc = texCoord;\n}\n\n#endif\n\n\n#ifdef FRAG\n\nuniform sampler2D image;\nvarying vec2 tc;\n\nconst float n = 512., h = 1./n;\nvoid main(void) {\n    vec4 t = texture2D(image, tc);\n    t.r -= (texture2D(image, vec2(tc.r + h, tc.g)).a - t.a)*n;\n    t.g -= (texture2D(image, vec2(tc.r, tc.g + h)).a - t.a)*n;\n    gl_FragColor = t;\n}\n\n#endif";
-var force   = "#ifdef VERT\n\nattribute vec2 position;\nattribute vec2 texCoord;\nuniform vec2 screenSize;\nuniform vec2 pixelPosition;\nuniform vec2 pixelSize;\nvarying vec2 tc;\n\nvoid main() {\n  float tx = position.x * 0.5 + 0.5; //-1 -> 0, 1 -> 1\n  float ty = -position.y * 0.5 + 0.5; //-1 -> 1, 1 -> 0\n  //(x + 0)/sw * 2 - 1, (x + w)/sw * 2 - 1\n  float x = (pixelPosition.x + pixelSize.x * tx)/screenSize.x * 2.0 - 1.0;  //0 -> -1, 1 -> 1\n  //1.0 - (y + h)/sh * 2, 1.0 - (y + h)/sh * 2\n  float y = 1.0 - (pixelPosition.y + pixelSize.y * ty)/screenSize.y * 2.0;  //0 -> 1, 1 -> -1\n  gl_Position = vec4(x, y, 0.0, 1.0);\n  tc = texCoord;\n}\n\n#endif\n\n\n#ifdef FRAG\n\nuniform sampler2D image;\nvarying vec2 tc;\n\nuniform float c;\nconst float h = 1./512.;\nvoid main(void) {\n    vec4 t = texture2D(image, tc);\n    t.g += c*(t.b + texture2D(image, vec2(tc.r, tc.g + h)).b );\n    gl_FragColor = t;\n}\n\n#endif\n";
-var p       = "#ifdef VERT\n\nattribute vec2 position;\nattribute vec2 texCoord;\nuniform vec2 screenSize;\nuniform vec2 pixelPosition;\nuniform vec2 pixelSize;\nvarying vec2 tc;\n\nvoid main() {\n  float tx = position.x * 0.5 + 0.5; //-1 -> 0, 1 -> 1\n  float ty = -position.y * 0.5 + 0.5; //-1 -> 1, 1 -> 0\n  //(x + 0)/sw * 2 - 1, (x + w)/sw * 2 - 1\n  float x = (pixelPosition.x + pixelSize.x * tx)/screenSize.x * 2.0 - 1.0;  //0 -> -1, 1 -> 1\n  //1.0 - (y + h)/sh * 2, 1.0 - (y + h)/sh * 2\n  float y = 1.0 - (pixelPosition.y + pixelSize.y * ty)/screenSize.y * 2.0;  //0 -> 1, 1 -> -1\n  gl_Position = vec4(x, y, 0.0, 1.0);\n  tc = texCoord;\n}\n\n#endif\n\n\n#ifdef FRAG\n\nuniform sampler2D image;\nvarying vec2 tc;\n\nconst float h = 1./512.;\nvoid main(void) {\n    vec4 t = texture2D(image, tc);\n    t.a =\n        (texture2D(image, vec2(tc.r - h, tc.g)).a +\n         texture2D(image, vec2(tc.r + h, tc.g)).a +\n         texture2D(image, vec2(tc.r, tc.g - h)).a +\n         texture2D(image, vec2(tc.r, tc.g + h)).a -\n         (t.r - texture2D(image, vec2(tc.r - h, tc.g)).r +\n          t.g - texture2D(image, vec2(tc.r, tc.g - h)).g) *h) *.25;\n    gl_FragColor = t;\n}\n\n#endif";
-var show    = "#ifdef VERT\n\nattribute vec2 position;\nattribute vec2 texCoord;\nuniform vec2 screenSize;\nuniform vec2 pixelPosition;\nuniform vec2 pixelSize;\nvarying vec2 tc;\n\nvoid main() {\n  float tx = position.x * 0.5 + 0.5; //-1 -> 0, 1 -> 1\n  float ty = -position.y * 0.5 + 0.5; //-1 -> 1, 1 -> 0\n  //(x + 0)/sw * 2 - 1, (x + w)/sw * 2 - 1\n  float x = (pixelPosition.x + pixelSize.x * tx)/screenSize.x * 2.0 - 1.0;  //0 -> -1, 1 -> 1\n  //1.0 - (y + h)/sh * 2, 1.0 - (y + h)/sh * 2\n  float y = 1.0 - (pixelPosition.y + pixelSize.y * ty)/screenSize.y * 2.0;  //0 -> 1, 1 -> -1\n  gl_Position = vec4(x, y, 0.0, 1.0);\n  tc = texCoord;\n}\n\n#endif\n\n\n#ifdef FRAG\n\nuniform sampler2D image;\nvarying vec2 tc;\n\nvoid main() {\n  float T = texture2D(image, tc).b;\n  if(T > 0.0) gl_FragColor = vec4(T, 0.0, 0.0, 1.0);\n  else gl_FragColor = vec4(0.0, 0.0, -T, 1.);\n}\n\n#endif";
+module.exports = DrawForce;
 
-var iterations = 10;
+function DrawForce (options) {
+  this.width = options.width;
+  this.height = options.height;
+  this.type = options.type || 'density';
+  this.radius = 0.05;
+  this.strength = 2.5;
+  this.force = new Vec3(0.3, 0.7, 0.9);
+  this.edge = 1;
 
+  this.forceBuffer = new FBO(this.width, this.height, { bpp: 32 });
+  this.density = new Color(1, 1, 1, 1);
+  this.velocity = new Vec2(0,0);
 
-function Fluid(uniforms) {
-    this.gl = Context.currentContext;
+  this.forceChanged = false;
+  this.forceApplied = false;
 
-    // force shader
-    this.force = new Program(force);
-    this.force.use();
-    this.force.uniforms.c(.001*.5*10);
-    //this.force.uniforms.image(0);
+  this._program = new Program(shader);
+  this._frameRenderer = new FrameRenderer(0, 0, this.width, this.height,
+                                                this.width, this.height);
 
-    // advect shader
-    this.advec = new Program(advec);
-
-    // div shader
-    this.div = new Program(div);
-    this.div.use();
-    //this.div.uniforms.image2(1);
-
-    // p shader (dunno what that is yet)
-    this.p = new Program(p);
-    this.p.use();
-    this.sampLoc = this.gl.getUniformLocation(this.p.handle, 'samp');
-
-    // source shader
-    this.source = new Program(source);
-    //this.source.use();
-    //this.source.uniforms.samp(0);
-    //this.source.uniforms.samp2(2);
-
-    // show shader
-    this.show = new Program(show);
 }
 
-Fluid.prototype.iterate = function(screenImage, fbo, fbo1, texture2) {
-    fbo1.bind();
-    texture2.bind(2);
-    this.source.use();
-    this.source.uniforms.image2(2);
-    glu.enableDepthReadAndWrite(false, false);
-    screenImage.draw(fbo.getColorAttachment(0), this.source);
-    fbo1.unbind();
+DrawForce.prototype.applyForce = function (normalizedPos) {
+  var absPos = normalizedPos.dup();
+  absPos.x *= this.width;
+  absPos.y *= this.height;
+  var absRadius = this.radius * this.width;
 
-    fbo.bind();
-    screenImage.draw(fbo1.getColorAttachment(0), this.force);
-    fbo.unbind();
+  var typeForce = this.force.clone();
+  if (this.type === 'velocity') {
+    typeForce.x *= this.width;
+    typeForce.y *= this.width;
+  }
 
-    fbo1.bind();
-    screenImage.draw(fbo.getColorAttachment(0), this.advec);
-    fbo1.unbind();
+  var value = new Vec4(typeForce.x, typeForce.y, typeForce.z, 1.0);
+  glu.enableAlphaBlending();
+  this.forceBuffer.bind();
+  this._program.use();
+  // vert
+  this._program.uniforms.screenSize(new Vec2(this.width, this.height));
+  this._program.uniforms.pixelPosition(new Vec2(0, 0));
+  this._program.uniforms.pixelSize(new Vec2(this.width, this.height));
+  // frag
+  this._program.uniforms.Point(absPos);
+  this._program.uniforms.Width(this.width);
+  this._program.uniforms.Height(this.height);
+  this._program.uniforms.Radius(absRadius);
+  this._program.uniforms.EdgeSmooth(this.edge);
+  this._program.uniforms.Value(value);
+  this._frameRenderer.draw(this._program);
+  this.forceBuffer.unbind();
+  glu.enableBlending(false);
 
-    for (var i=0; i<iterations; i++) {
-        fbo.bind();
-        screenImage.draw(fbo1.getColorAttachment(0), this.p);
-        fbo.unbind();
-        this.gl.uniform1i(this.sampLoc, 0);
-        fbo1.bind();
-        screenImage.draw(fbo.getColorAttachment(0), this.p);
-        fbo1.unbind();
+  this.forceApplied = true;
+}
+
+DrawForce.prototype.clear = function () {
+  this.forceBuffer.bind();
+  glu.clearColor(Color.Black);
+  this.forceBuffer.unbind();
+}
+
+DrawForce.prototype.update = function () {
+  if (this.forceApplied) this.forceChanged = true;
+  this.forceApplied = false;
+}
+
+
+
+},{"./FrameRenderer":3,"pex-color":18,"pex-geom":36,"pex-glu":54}],3:[function(require,module,exports){
+var geom = require('pex-geom');
+var Vec2 = geom.Vec2;
+var Geometry = geom.Geometry;
+var glu = require('pex-glu');
+var Program = glu.Program;
+var Material = glu.Material;
+var Mesh = glu.Mesh;
+
+
+var shader = "#ifdef VERT\n\nattribute vec2 position;\nattribute vec2 texCoord;\nuniform vec2 screenSize;\nuniform vec2 pixelPosition;\nuniform vec2 pixelSize;\nvarying vec2 vTexCoord;\n\nvoid main() {\n  float tx = position.x * 0.5 + 0.5; //-1 -> 0, 1 -> 1\n  float ty = -position.y * 0.5 + 0.5; //-1 -> 1, 1 -> 0\n  //(x + 0)/sw * 2 - 1, (x + w)/sw * 2 - 1\n  float x = (pixelPosition.x + pixelSize.x * tx)/screenSize.x * 2.0 - 1.0;  //0 -> -1, 1 -> 1\n  //1.0 - (y + h)/sh * 2, 1.0 - (y + h)/sh * 2\n  float y = 1.0 - (pixelPosition.y + pixelSize.y * ty)/screenSize.y * 2.0;  //0 -> 1, 1 -> -1\n  gl_Position = vec4(x, y, 0.0, 1.0); \n  //gl_Position = vec4(position.xy, 0.0, 1.0);\n\n  vTexCoord = texCoord;\n}\n\n#endif\n\n#ifdef FRAG\n\nvarying vec2 vTexCoord;\nuniform sampler2D image;\nuniform float alpha;\n\nvoid main() {\n  gl_FragColor = texture2D(image, vTexCoord);\n  gl_FragColor.a *= alpha;\n}\n\n#endif\n\n";
+
+function FrameRenderer(x, y, w, h, screenWidth, screenHeight) {
+  x = x !== undefined ? x : 0;
+  y = y !== undefined ? y : 0;
+  w = w !== undefined ? w : 1;
+  h = h !== undefined ? h : 1;
+  screenWidth = screenWidth !== undefined ? screenWidth : 1;
+  screenHeight = screenHeight !== undefined ? screenHeight : 1;
+  var program = new Program(shader);
+  var uniforms = {
+    screenSize: Vec2.create(screenWidth, screenHeight),
+    pixelPosition: Vec2.create(x, y),
+    pixelSize: Vec2.create(w, h),
+    alpha: 1
+  };
+  var material = new Material(program, uniforms);
+  var vertices = [
+    new Vec2(-1, 1),
+    new Vec2(-1, -1),
+    new Vec2(1, -1),
+    new Vec2(1, 1)
+  ];
+//  var vertices = [
+//    new Vec2(-0.9, 0.9),
+//    new Vec2(-0.9, -0.9),
+//    new Vec2(0.9, -0.9),
+//    new Vec2(0.9, 0.9)
+//  ];
+  var texCoords = [
+    new Vec2(0, 1),
+    new Vec2(0, 0),
+    new Vec2(1, 0),
+    new Vec2(1, 1)
+  ];
+  var geometry = new Geometry({
+    vertices: vertices,
+    texCoords: texCoords,
+    faces: true
+  });
+  // 0----3  0,1   1,1
+  // | \  |      u
+  // |  \ |      v
+  // 1----2  0,0   0,1
+  geometry.faces.push([0, 1, 2]);
+  geometry.faces.push([0, 2, 3]);
+  this.mesh = new Mesh(geometry, material);
+}
+
+FrameRenderer.prototype.setAlpha = function (alpha) {
+  this.mesh.material.uniforms.alpha = alpha;
+};
+
+FrameRenderer.prototype.setPosition = function (position) {
+  this.mesh.material.uniforms.pixelPosition = position;
+};
+
+FrameRenderer.prototype.setSize = function (size) {
+  this.mesh.material.uniforms.pixelSize = size;
+};
+
+FrameRenderer.prototype.setScreenSize = function (size) {
+  this.mesh.material.uniforms.screenSize = size;
+};
+
+FrameRenderer.prototype.setBounds = function (bounds) {
+  this.mesh.material.uniforms.pixelPosition.x = bounds.x;
+  this.mesh.material.uniforms.pixelPosition.y = bounds.y;
+  this.mesh.material.uniforms.pixelSize.x = bounds.width;
+  this.mesh.material.uniforms.pixelSize.y = bounds.height;
+};
+
+FrameRenderer.prototype.draw = function (program) {
+  this.mesh.setProgram(program);
+  this.mesh.draw();
+};
+
+module.exports = FrameRenderer;
+
+},{"pex-geom":36,"pex-glu":54}],4:[function(require,module,exports){
+var glu = require('pex-glu');
+var FBO = glu.RenderTarget;
+
+function PingPong (options) {
+  var options = options || {};
+  this.width = options.width || 512;
+  this.height = options.height || 512;
+  this.fboOpts = options.fboOpts || {};
+
+  this.sourceBuffer = new FBO(this.width, this.height, this.fboOpts);
+  this.destBuffer = new FBO(this.width, this.height, this.fboOpts);
+}
+
+PingPong.prototype.swap = function () {
+  var temp = this.sourceBuffer;
+  this.sourceBuffer = this.destBuffer;
+  this.destBuffer = temp;
+}
+
+PingPong.prototype.clear = function () {
+  this.sourceBuffer.bindAndClear();
+  this.sourceBuffer.unbind();
+  this.destBuffer.bindAndClear();
+  this.destBuffer.unbind();
+}
+
+module.exports = PingPong;
+
+
+},{"pex-glu":54}],5:[function(require,module,exports){
+var glu = require('pex-glu');
+var Context = glu.Context;
+var Program = glu.Program;
+var FBO = glu.RenderTarget;
+var Texture2D = glu.Texture2D;
+var ScreenImage = glu.ScreenImage;
+var Color = require('pex-color').Color;
+var Material = require('../pex-hacks/Material.js');
+var merge = require('merge');
+var sys = require('pex-sys');
+
+var PingPong = require('./PingPong.js');
+//Shaders
+var AdvectShader = require('./shaders/AdvectShader.js');
+var ClampLengthShader = require('./shaders/ClampLengthShader.js');
+var DiffuseShader = require('./shaders/DiffuseShader.js');
+var DivergenceShader = require('./shaders/DivergenceShader.js');
+var JacobiShader = require('./shaders/JacobiShader.js');
+var AddForceShader = require('./shaders/AddForceShader.js');
+var SubstractGradientShader = require('./shaders/SubstractGradientShader.js');
+var FrameRenderer = require('./FrameRenderer.js');
+
+function Fluid(simWidth, simHeight, drawWidth, drawHeight) {
+
+  // Fluid variables
+  this.width = simWidth;
+  this.height = simHeight;
+  this.drawWidth = drawWidth;
+  this.drawHeight = drawHeight;
+  this.iterations = 40;       // 1 to 100
+  this.speed = 0.5;            // 0 to 100
+  this.cellSize = 1.25;       // 0.0 to 2.0
+  this.viscosity = 0.5;     // 0 to 1
+  this.dissipation = 0.0008;   // 0 to 0.02
+  this.clampForce = 0.01;     // 0 to 0.1
+  this.maxDensity = 1;        // 0 to 5
+  this.maxVelocity = 1;       // 0 to 10
+  //-----------------------------
+
+  this.frameRenderer = new FrameRenderer(0, 0, this.width, this.height,
+                                                this.width, this.height);
+
+  this.densityFrameRenderer = new FrameRenderer(0, 0, drawWidth, drawHeight,
+                                                      drawWidth, drawHeight);
+  var gl = Context.currentContext;
+
+  // Buffers
+  this.densityPingPong  = new PingPong({
+    width: drawWidth
+  , height: drawHeight
+  , fboOpts: { format: gl.RGBA, bpp: 32 }
+  });
+  this.densityPingPong.clear();
+
+  this.velocityPingPong = new PingPong({
+    width: this.width
+  , height: this.height
+  , fboOpts: { format: gl.RGBA, bpp: 32 }
+  });
+  this.velocityPingPong.clear();
+  this.pressurePingPong = new PingPong({width: this.width,
+                                        height: this.height});
+  this.pressurePingPong.clear();
+
+  this.divergenceBuffer = new FBO(this.width, this.height, { bpp: 32 });
+  this.divergenceBuffer.bindAndClear();
+  this.divergenceBuffer.unbind();
+  this.obstacleBuffer = new FBO(this.width, this.height, { bpp: 32 });
+  this.obstacleBuffer.bindAndClear();
+  this.obstacleBuffer.unbind();
+  this.pressureBuffer = new FBO(this.width, this.height, { bpp: 32 });
+  this.pressureBuffer.bindAndClear();
+  this.pressureBuffer.unbind();
+  this.comboObstacleBuffer = new FBO(this.width, this.height, { bpp: 32 });
+  this.comboObstacleBuffer.bindAndClear();
+  this.comboObstacleBuffer.unbind();
+
+  // Shaders
+  this.clampLengthShader = new ClampLengthShader(this.width, this.height);
+  this.advectShader = new AdvectShader(this.width, this.height);
+  this.diffuseShader = new DiffuseShader(this.width, this.height);
+  this.divergenceShader = new DivergenceShader(this.width, this.height);
+  this.jacobiShader = new JacobiShader(this.width, this.height);
+  this.addForceShader = new AddForceShader(this.width, this.height);
+  this.substractGradientShader = new SubstractGradientShader(this.width, this.height);
+
+}
+
+Fluid.prototype.addDensity = function (options) {
+  glu.viewport(0, 0, this.drawWidth, this.drawHeight);
+  var texture = options.texture;
+  var strength = options.strength;
+  glu.enableBlending(false);
+  this.addForceShader.update({
+    destBuffer: this.densityPingPong.destBuffer
+  , backBufferTex: this.densityPingPong.sourceBuffer.getColorAttachment(0)
+  , addTex: texture
+  , force: strength
+  , frameRenderer: this.densityFrameRenderer
+  });
+  this.densityPingPong.swap();
+}
+
+Fluid.prototype.addVelocity = function (options) {
+  glu.viewport(0, 0, this.width, this.height);
+  var texture = options.texture;
+  var strength = options.strength;
+  glu.enableBlending(false);
+  this.addForceShader.update({
+    destBuffer: this.velocityPingPong.destBuffer
+  , backBufferTex: this.velocityPingPong.sourceBuffer.getColorAttachment(0)
+  , addTex: texture
+  , force: strength
+  , frameRenderer: this.frameRenderer
+  });
+  this.velocityPingPong.swap();
+}
+
+Fluid.prototype.iterate = function () {
+  this.deltaTime = sys.Time.delta;
+  this.timeStep = this.deltaTime * this.speed;
+
+  glu.enableBlending(false);
+//  glu.enableAlphaBlending();
+
+  // Clamp Length
+  if (this.maxDensity > 0) {
+    glu.viewport(0, 0, this.drawWidth, this.drawHeight);
+    this.clampLengthShader.update({
+      destBuffer: this.densityPingPong.destBuffer
+    , backBufferTex: this.densityPingPong.sourceBuffer.getColorAttachment(0)
+    , max: this.maxDensity
+    , clampForce: this.clampForce
+    , frameRenderer: this.densityFrameRenderer
+    });
+    this.densityPingPong.swap();
+  }
+  if (this.maxVelocity > 0) {
+    glu.viewport(0, 0, this.width, this.height);
+    this.clampLengthShader.update({
+      destBuffer: this.velocityPingPong.destBuffer
+    , backBufferTex: this.velocityPingPong.sourceBuffer.getColorAttachment(0)
+    , max: this.maxVelocity
+    , clampForce: this.clampForce
+    , frameRenderer: this.frameRenderer
+    });
+    this.velocityPingPong.swap();
+  }
+
+   // Advect
+  glu.viewport(0, 0, this.width, this.height);
+  this.advectShader.update({
+    destBuffer: this.velocityPingPong.destBuffer
+  , backBufferTex: this.velocityPingPong.sourceBuffer.getColorAttachment(0)
+  , velocityTex: this.velocityPingPong.sourceBuffer.getColorAttachment(0)
+  , obstacleTex: this.comboObstacleBuffer.getColorAttachment(0)
+  , timeStep: this.timeStep
+  , dissipation: 1.0 - this.dissipation
+  , cellSize: this.cellSize
+  , frameRenderer: this.frameRenderer
+  });
+  this.velocityPingPong.swap();
+
+  glu.viewport(0, 0, this.drawWidth, this.drawHeight);
+  this.advectShader.update({
+    destBuffer: this.densityPingPong.destBuffer
+  , backBufferTex: this.densityPingPong.sourceBuffer.getColorAttachment(0)
+  , velocityTex: this.velocityPingPong.sourceBuffer.getColorAttachment(0)
+  , obstacleTex: this.comboObstacleBuffer.getColorAttachment(0)
+  , timeStep: this.timeStep
+  , dissipation: 1.0 - this.dissipation
+  , cellSize: this.cellSize
+  , frameRenderer: this.densityFrameRenderer
+  , type: 'density'
+  });
+  this.densityPingPong.swap();
+
+  // Diffuse
+  if (this.viscosity > 0) {
+  glu.viewport(0, 0, this.width, this.height);
+    for (var i=0; i<this.iterations; i++) {
+      this.diffuseShader.update({
+        destBuffer: this.velocityPingPong.destBuffer
+      , backBufferTex: this.velocityPingPong.sourceBuffer.getColorAttachment(0)
+      , obstacleTex: this.comboObstacleBuffer.getColorAttachment(0)
+      , viscosity: this.viscosity * this.deltaTime
+      , frameRenderer: this.frameRenderer
+      });
+      this.velocityPingPong.swap();
     }
+  }
 
-    fbo.bind();
-    screenImage.draw(fbo1.getColorAttachment(0), this.div);
-    fbo.unbind();
+  // Divergence and Jacobi
+  this.divergenceBuffer.bindAndClear();
+  this.divergenceBuffer.unbind();
+  glu.viewport(0, 0, this.width, this.height);
+  this.divergenceShader.update({
+    destBuffer: this.divergenceBuffer
+  , velocityTex: this.velocityPingPong.sourceBuffer.getColorAttachment(0)
+  , obstacleTex: this.comboObstacleBuffer.getColorAttachment(0)
+  , cellSize: this.cellSize
+  , frameRenderer: this.frameRenderer
+  });
 
-    screenImage.draw(fbo.getColorAttachment(0), this.show);
+  this.pressurePingPong.clear();
+  glu.viewport(0, 0, this.width, this.height);
+  for (var i=0; i<this.iterations; i++){
+    this.jacobiShader.update({
+      destBuffer: this.pressurePingPong.destBuffer
+    , backBufferTex: this.pressurePingPong.sourceBuffer.getColorAttachment(0)
+    , obstacleTex: this.obstacleBuffer.getColorAttachment(0)
+    , divergenceTex: this.divergenceBuffer.getColorAttachment(0)
+    , cellSize: this.cellSize
+    , frameRenderer: this.frameRenderer
+    });
+    this.pressurePingPong.swap();
+  }
+
+  if (this.addPressureBufferDidChange) {
+    glu.viewport(0, 0, this.width, this.height);
+    this.addPressureBufferDidChange = false;
+    this.addForceShader.update({
+      destBuffer: this.pressurePingPong.destBuffer
+    , backBuffferTex: this.pressurePingPong.sourceBuffer.getColorAttachment(0)
+    , addTex: this.pressureBuffer.getColorAttachment(0)
+    , force: 1
+    , frameRenderer: this.frameRenderer
+    });
+    this.pressurePingPong.swap();
+  }
+
+  glu.viewport(0, 0, this.width, this.height);
+  this.substractGradientShader.update({
+    destBuffer: this.velocityPingPong.destBuffer
+   , backBufferTex: this.velocityPingPong.sourceBuffer.getColorAttachment(0)
+   , pressureTex: this.pressurePingPong.sourceBuffer.getColorAttachment(0)
+   , obstacleTex: this.comboObstacleBuffer.getColorAttachment(0)
+   , cellSize: this.cellSize
+   , frameRenderer: this.frameRenderer
+  });
+  this.velocityPingPong.swap();
+
+  return this.densityPingPong.destBuffer.getColorAttachment(0);
+
 }
 
 module.exports = Fluid;
 
-},{"merge":7,"pex-color":8,"pex-glu":44}],3:[function(require,module,exports){
+
+
+},{"../pex-hacks/Material.js":100,"./FrameRenderer.js":3,"./PingPong.js":4,"./shaders/AddForceShader.js":6,"./shaders/AdvectShader.js":7,"./shaders/ClampLengthShader.js":8,"./shaders/DiffuseShader.js":9,"./shaders/DivergenceShader.js":10,"./shaders/JacobiShader.js":11,"./shaders/SubstractGradientShader.js":12,"merge":17,"pex-color":18,"pex-glu":54,"pex-sys":92}],6:[function(require,module,exports){
+var glu = require('pex-glu');
+var Context = glu.Context;
+var Program = glu.Program;
+
+var Vec2 = require('pex-geom').Vec2;
+var shader = "#ifdef VERT\n\nattribute vec2 position;\nattribute vec2 texCoord;\nuniform vec2 screenSize;\nuniform vec2 pixelPosition;\nuniform vec2 pixelSize;\nvarying vec2 tc;\n\nvoid main() {\n  float tx = position.x * 0.5 + 0.5; //-1 -> 0, 1 -> 1\n  float ty = -position.y * 0.5 + 0.5; //-1 -> 1, 1 -> 0\n  //(x + 0)/sw * 2 - 1, (x + w)/sw * 2 - 1\n  float x = (pixelPosition.x + pixelSize.x * tx)/screenSize.x * 2.0 - 1.0;  //0 -> -1, 1 -> 1\n  //1.0 - (y + h)/sh * 2, 1.0 - (y + h)/sh * 2\n  float y = 1.0 - (pixelPosition.y + pixelSize.y * ty)/screenSize.y * 2.0;  //0 -> 1, 1 -> -1\n  gl_Position = vec4(x, y, 0.0, 1.0);\n  tc = texCoord;\n}\n\n#endif\n\n#ifdef FRAG\n\nuniform sampler2D Backbuffer;\nuniform sampler2D AddTexture;\nuniform float force;\nuniform vec2 Scale;\nvarying vec2 tc;\n\nvoid main(){\n  vec2 tc2 = tc * Scale;\n\n  vec4 color = texture2D(Backbuffer, tc) + texture2D(AddTexture, tc2) * force;\n  gl_FragColor = color;\n}\n\n#endif\n\n\n\n";
+
+function AddForceShader (width, height) {
+  this.width = width;
+  this.height = height;
+  this._program = new Program(shader);
+  this._program.use();
+}
+
+AddForceShader.prototype.update = function (options) {
+  var destBuffer = options.destBuffer
+    , backBufferTex = options.backBufferTex
+    , addTex = options.addTex
+    , force = options.force
+    , frameRenderer = options.frameRenderer;
+
+  if (!destBuffer) throw new Error("no destBuffer");
+  if (!backBufferTex) throw new Error("no backBufferTex");
+  if (!addTex) throw new Error("no velocityTex");
+  //if (!force) throw new Error("no obstacleTex");
+  if (!frameRenderer) throw new Error("no frameRenderer");
+
+  destBuffer.bind();
+  this._program.use();
+  //vert
+  this._program.uniforms.screenSize(new Vec2(this.width, this.height));
+  this._program.uniforms.pixelPosition(new Vec2(0, 0));
+  this._program.uniforms.pixelSize(new Vec2(this.width, this.height));
+  //frag
+  backBufferTex.bind(0);
+  this._program.uniforms.Backbuffer(0);
+  addTex.bind(1);
+  this._program.uniforms.AddTexture(1);
+  this._program.uniforms.force(force);
+  var scale = new Vec2(addTex.width / destBuffer.width,
+                        addTex.height / destBuffer.height);
+  this._program.uniforms.Scale(scale);
+  frameRenderer.draw(this._program);
+  destBuffer.unbind();
+
+}
+
+module.exports = AddForceShader;
+
+},{"pex-geom":36,"pex-glu":54}],7:[function(require,module,exports){
+var glu = require('pex-glu');
+var Context = glu.Context;
+var Program = glu.Program;
+
+var shader = "#ifdef VERT\n\nattribute vec2 position;\nattribute vec2 texCoord;\nuniform vec2 screenSize;\nuniform vec2 pixelPosition;\nuniform vec2 pixelSize;\nvarying vec2 tc;\n\nvoid main() {\n  float tx = position.x * 0.5 + 0.5; //-1 -> 0, 1 -> 1\n  float ty = -position.y * 0.5 + 0.5; //-1 -> 1, 1 -> 0\n  //(x + 0)/sw * 2 - 1, (x + w)/sw * 2 - 1\n  float x = (pixelPosition.x + pixelSize.x * tx)/screenSize.x * 2.0 - 1.0;  //0 -> -1, 1 -> 1\n  //1.0 - (y + h)/sh * 2, 1.0 - (y + h)/sh * 2\n  float y = 1.0 - (pixelPosition.y + pixelSize.y * ty)/screenSize.y * 2.0;  //0 -> 1, 1 -> -1\n  gl_Position = vec4(x, y, 0.0, 1.0);\n  tc = texCoord ;\n}\n\n#endif\n\n#ifdef FRAG\n\nuniform sampler2D Backbuffer;\nuniform sampler2D Obstacle;\nuniform sampler2D Velocity;\n\nuniform float Width;\nuniform float Height;\nuniform float TimeStep;\nuniform float Dissipation;\nuniform float InverseCellSize;\nuniform vec2 Scale;\nvarying vec2 tc;\n\nvoid main(){\n  vec2 texelSize = vec2(Width, Height);\n  vec2 tcs = tc * texelSize;\n  vec2 tc2 = tc * Scale;\n\n  float xc = texture2D(Obstacle, tc2).x;\n\n  float inverseSolid = 1.0 - ceil(xc - 0.5);\n\n  vec2 u = texture2D(Velocity, tc2).rg / Scale;\n  vec2 coord =  tcs - TimeStep * InverseCellSize * u;\n  coord /= texelSize;\n\n  gl_FragColor = Dissipation * texture2D(Backbuffer, coord) * inverseSolid;\n\n}\n\n#endif\n";
+var Vec2 = require('pex-geom').Vec2;
+
+function AdvectShader (width, height) {
+  this.width = width || 512;
+  this.height = height || 512;
+  this._program = new Program(shader);
+}
+
+AdvectShader.prototype.update = function (options) {
+  var destBuffer = options.destBuffer
+    , backBufferTex = options.backBufferTex
+    , velocityTex = options.velocityTex
+    , obstacleTex = options.obstacleTex
+    , timeStep = options.timeStep
+    , dissipation = options.dissipation
+    , cellSize = options.cellSize
+    , frameRenderer = options.frameRenderer
+    , type = options.type || 'nope';
+
+  if (!destBuffer) throw new Error("no destBuffer");
+  if (!backBufferTex) throw new Error("no backBufferTex");
+  if (!velocityTex) throw new Error("no velocityTex");
+  if (!obstacleTex) throw new Error("no obstacleTex");
+  if (!timeStep) console.log("no timestep");
+  if (!dissipation) throw new Error("no dissipation");
+  if (!cellSize) throw new Error("no cellSize");
+  if (!frameRenderer) throw new Error("no frameRenderer");
+
+  destBuffer.bind();
+  this._program.use();
+  //vert
+  this._program.uniforms.screenSize(new Vec2(this.width, this.height));
+  this._program.uniforms.pixelPosition(new Vec2(0, 0));
+  this._program.uniforms.pixelSize(new Vec2(this.width, this.height));
+  //frag
+  backBufferTex.bind(0);
+  this._program.uniforms.Backbuffer(0);
+  velocityTex.bind(1);
+  this._program.uniforms.Velocity(1);
+  obstacleTex.bind(2);
+  this._program.uniforms.Obstacle(2);
+  this._program.uniforms.Width(this.width);
+  this._program.uniforms.Height(this.height);
+  this._program.uniforms.TimeStep(timeStep);
+  this._program.uniforms.Dissipation(dissipation);
+  this._program.uniforms.InverseCellSize(1.0 / cellSize);
+  var scale = new Vec2(velocityTex.width / destBuffer.width,
+                      velocityTex.height / destBuffer.height);
+  this._program.uniforms.Scale(scale);
+  frameRenderer.draw(this._program);
+  destBuffer.unbind();
+
+}
+
+module.exports = AdvectShader;
+
+
+},{"pex-geom":36,"pex-glu":54}],8:[function(require,module,exports){
+var glu = require('pex-glu');
+var Context = glu.Context;
+var Program = glu.Program;
+
+var shader = "#ifdef VERT\n\nattribute vec2 position;\nattribute vec2 texCoord;\nuniform vec2 screenSize;\nuniform vec2 pixelPosition;\nuniform vec2 pixelSize;\nvarying vec2 tc;\n\nvoid main() {\n  float tx = position.x * 0.5 + 0.5; //-1 -> 0, 1 -> 1\n  float ty = -position.y * 0.5 + 0.5; //-1 -> 1, 1 -> 0\n  //(x + 0)/sw * 2 - 1, (x + w)/sw * 2 - 1\n  float x = (pixelPosition.x + pixelSize.x * tx)/screenSize.x * 2.0 - 1.0;  //0 -> -1, 1 -> 1\n  //1.0 - (y + h)/sh * 2, 1.0 - (y + h)/sh * 2\n  float y = 1.0 - (pixelPosition.y + pixelSize.y * ty)/screenSize.y * 2.0;  //0 -> 1, 1 -> -1\n  gl_Position = vec4(x, y, 0.0, 1.0);\n  tc = texCoord;\n}\n\n#endif\n\n#ifdef FRAG\n\nuniform sampler2D Backbuffer;\nuniform float MaxLength;\nuniform float ClampForce;\nvarying vec2 tc;\n\nvoid main(){\n\n  vec4 color = texture2D(Backbuffer, tc);\n\n  float l = length(color.xyz);\n  if (l > MaxLength) {\n    float dinges = (l - MaxLength) * ClampForce;\n    color.xyz = normalize(color.xyz) * (l - dinges);\n  }\n  gl_FragColor = color ;\n}\n\n\n#endif\n";
+var Vec2 = require('pex-geom').Vec2;
+
+function ClampLengthShader (width, height) {
+  this.width = width || 512;
+  this.height = height || 512;
+  this._program = new Program(shader);
+}
+
+ClampLengthShader.prototype.update = function (options) {
+  var destBuffer = options.destBuffer
+    , backBufferTex = options.backBufferTex
+    , max = options.max
+    , clampForce = options.clampForce
+    , frameRenderer = options.frameRenderer;
+
+  if (!destBuffer) throw new Error("no destBuffer");
+  if (!backBufferTex) throw new Error("no backBufferTex");
+  if (!max) throw new Error("no max");
+  if (!clampForce) throw new Error("no clampForce");
+  if (!frameRenderer) throw new Error("no frameRenderer");
+
+  destBuffer.bind();
+  this._program.use();
+  //vert
+  this._program.uniforms.screenSize(new Vec2(this.width, this.height));
+  this._program.uniforms.pixelPosition(new Vec2(0, 0));
+  this._program.uniforms.pixelSize(new Vec2(this.width, this.height));
+  //frag
+  backBufferTex.bind(0);
+  this._program.uniforms.Backbuffer(0);
+  this._program.uniforms.MaxLength(max);
+  this._program.uniforms.ClampForce(clampForce);
+  frameRenderer.draw(this._program);
+  destBuffer.unbind();
+
+}
+
+module.exports = ClampLengthShader;
+
+},{"pex-geom":36,"pex-glu":54}],9:[function(require,module,exports){
+var glu = require('pex-glu');
+var Context = glu.Context;
+var Program = glu.Program;
+
+var shader  = "#ifdef VERT\n\nattribute vec2 position;\nattribute vec2 texCoord;\nuniform vec2 screenSize;\nuniform vec2 pixelPosition;\nuniform vec2 pixelSize;\nvarying vec2 tc;\n\nvoid main() {\n  float tx = position.x * 0.5 + 0.5; //-1 -> 0, 1 -> 1\n  float ty = -position.y * 0.5 + 0.5; //-1 -> 1, 1 -> 0\n  //(x + 0)/sw * 2 - 1, (x + w)/sw * 2 - 1\n  float x = (pixelPosition.x + pixelSize.x * tx)/screenSize.x * 2.0 - 1.0;  //0 -> -1, 1 -> 1\n  //1.0 - (y + h)/sh * 2, 1.0 - (y + h)/sh * 2\n  float y = 1.0 - (pixelPosition.y + pixelSize.y * ty)/screenSize.y * 2.0;  //0 -> 1, 1 -> -1\n  gl_Position = vec4(x, y, 0.0, 1.0);\n  tc = texCoord;\n}\n\n#endif\n\n#ifdef FRAG\nuniform sampler2D Velocity;\nuniform sampler2D Obstacle;\nuniform float Viscosity;\nuniform float C;\nuniform int test;\nuniform float Width;\nuniform float Height;\nvarying vec2 tc;\n\nvoid v2TexNeighbors(sampler2D tex, vec2 st,\n    out vec2 left, out vec2 right, out vec2 bottom, out vec2 top, vec2 ts) {\n  left   = texture2D(tex, st - vec2(1, 0) / ts ).xy;\n  right  = texture2D(tex, st + vec2(1, 0) / ts ).xy;\n  bottom = texture2D(tex, st - vec2(0, 1) / ts ).xy;\n  top    = texture2D(tex, st + vec2(0, 1) / ts ).xy;\n\n}\n\nvoid fRoundTexNeighbors(sampler2D tex, vec2 st,\n    out float left, out float right, out float bottom, out float top, vec2 ts) {\n  left   = ceil(texture2D(tex, st - vec2(1, 0) / ts ).x - 0.5);\n  right  = ceil(texture2D(tex, st + vec2(1, 0) / ts ).x - 0.5);\n  bottom = ceil(texture2D(tex, st - vec2(0, 1) / ts ).x - 0.5);\n  top    = ceil(texture2D(tex, st + vec2(0, 1) / ts ).x - 0.5);\n\n}\n\nvoid main(){\n\n  vec2 texelSize = vec2(Width, Height);\n\n  vec2 vL; vec2 vR; vec2 vB; vec2 vT;\n  v2TexNeighbors (Velocity, tc, vL, vR, vB, vT, texelSize);\n  vec2 vC = texture2D(Velocity, tc).xy;\n\n  float oL; float oR; float oB; float oT;\n  fRoundTexNeighbors (Obstacle, tc, oL, oR, oB, oT, texelSize);\n  float inverseSolid = 1.0 - ceil(texture2D(Obstacle, tc).x - 0.5);\n\n  vL *= 1.0 - oL;\n  vR *= 1.0 - oR;\n  vB *= 1.0 - oB;\n  vT *= 1.0 - oT;\n  // ADD NEIGHBOR OBSTACLES;\n\n  vec2 newVel = ((vC + Viscosity * (vL + vR + vB + vT)) / C) * inverseSolid;\n\n  gl_FragColor = vec4(newVel, 0.0, 0.0);\n}\n\n#endif\n\n";
+var Vec2 = require('pex-geom').Vec2;
+
+function DiffuseShader (width, height) {
+  this.width = width || 512;
+  this.height = height || 512;
+  this._program = new Program(shader);
+}
+
+DiffuseShader.prototype.update = function (options) {
+  var destBuffer = options.destBuffer
+    , backBufferTex = options.backBufferTex
+    , obstacleTex = options.obstacleTex
+    , viscosity = options.viscosity
+    , frameRenderer = options.frameRenderer;
+
+  if (!destBuffer) throw new Error("no destBuffer");
+  if (!backBufferTex) throw new Error("no backBufferTex");
+  if (!obstacleTex) throw new Error("no obstacleTex");
+  //if (!viscosity) throw new Error("no viscosity");
+  if (!frameRenderer) throw new Error("no frameRenderer");
+
+  destBuffer.bind();
+  this._program.use();
+  //vert
+  this._program.uniforms.screenSize(new Vec2(this.width, this.height));
+  this._program.uniforms.pixelPosition(new Vec2(0, 0));
+  this._program.uniforms.pixelSize(new Vec2(this.width, this.height));
+  //frag
+  backBufferTex.bind(0);
+  this._program.uniforms.Velocity(0);
+  obstacleTex.bind(1);
+  this._program.uniforms.Obstacle(1);
+  this._program.uniforms.Width(this.width);
+  this._program.uniforms.Height(this.height);
+  this._program.uniforms.Viscosity(viscosity);
+  this._program.uniforms.C(1 + 4 * viscosity);
+  frameRenderer.draw(this._program);
+  destBuffer.unbind();
+
+}
+
+module.exports = DiffuseShader;
+
+
+
+},{"pex-geom":36,"pex-glu":54}],10:[function(require,module,exports){
+var glu = require('pex-glu');
+var Context = glu.Context;
+var Program = glu.Program;
+
+var shader  = "#ifdef VERT\n\nattribute vec2 position;\nattribute vec2 texCoord;\nuniform vec2 screenSize;\nuniform vec2 pixelPosition;\nuniform vec2 pixelSize;\nvarying vec2 tc;\n\nvoid main() {\n  float tx = position.x * 0.5 + 0.5; //-1 -> 0, 1 -> 1\n  float ty = -position.y * 0.5 + 0.5; //-1 -> 1, 1 -> 0\n  //(x + 0)/sw * 2 - 1, (x + w)/sw * 2 - 1\n  float x = (pixelPosition.x + pixelSize.x * tx)/screenSize.x * 2.0 - 1.0;  //0 -> -1, 1 -> 1\n  //1.0 - (y + h)/sh * 2, 1.0 - (y + h)/sh * 2\n  float y = 1.0 - (pixelPosition.y + pixelSize.y * ty)/screenSize.y * 2.0;  //0 -> 1, 1 -> -1\n  gl_Position = vec4(x, y, 0.0, 1.0);\n  tc = texCoord;\n}\n\n#endif\n\n#ifdef FRAG\n\nuniform sampler2D Velocity;\nuniform sampler2D Obstacle;\nuniform float HalfInverseCellSize;\nuniform float Width;\nuniform float Height;\nvarying vec2 tc;\n\nvoid v2TexNeighbors(sampler2D tex, vec2 st,\n    out vec2 left, out vec2 right, out vec2 bottom, out vec2 top, vec2 ts) {\n  left   = texture2D(tex, st - vec2(1, 0) / ts ).xy;\n  right  = texture2D(tex, st + vec2(1, 0) / ts ).xy;\n  bottom = texture2D(tex, st - vec2(0, 1) / ts ).xy;\n  top    = texture2D(tex, st + vec2(0, 1) / ts ).xy;\n}\n\nvoid fRoundTexNeighbors(sampler2D tex, vec2 st,\n    out float left, out float right, out float bottom, out float top, vec2 ts) {\n  left   = ceil(texture2D(tex, st - vec2(1, 0) / ts ).x - 0.5);\n  right  = ceil(texture2D(tex, st + vec2(1, 0) / ts ).x - 0.5);\n  bottom = ceil(texture2D(tex, st - vec2(0, 1) / ts ).x - 0.5);\n  top    = ceil(texture2D(tex, st + vec2(0, 1) / ts ).x - 0.5);\n}\n\nvoid main(){\n\n  vec2 texelSize = vec2(Width, Height);\n\n  vec2 vL; vec2 vR; vec2 vB; vec2 vT;\n  v2TexNeighbors (Velocity, tc, vL, vR, vB, vT, texelSize);\n  float oL; float oR; float oB; float oT;\n  fRoundTexNeighbors (Obstacle, tc, oL, oR, oB, oT, texelSize);\n\n  vL *= 1.0 - oL;\n  vR *= 1.0 - oR;\n  vB *= 1.0 - oB;\n  vT *= 1.0 - oT;\n\n  gl_FragColor.r = HalfInverseCellSize * (vR.x - vL.x + vT.y - vB.y);\n\n}\n\n#endif\n\n\n";
+var Vec2 = require('pex-geom').Vec2;
+
+function DivergenceShader (width, height) {
+  this.width = width || 512;
+  this.height = height || 512;
+  this._program = new Program(shader);
+}
+
+DivergenceShader.prototype.update = function (options) {
+  var destBuffer = options.destBuffer
+    , velocityTex = options.velocityTex
+    , obstacleTex = options.obstacleTex
+    , cellSize = options.cellSize
+    , frameRenderer = options.frameRenderer;
+
+  if (!destBuffer) throw new Error("no destBuffer");
+  if (!velocityTex) throw new Error("no velocityTex");
+  if (!obstacleTex) throw new Error("no obstacleTex");
+  if (!cellSize) throw new Error("no cellSize");
+  if (!frameRenderer) throw new Error("no frameRenderer");
+
+  destBuffer.bind();
+  this._program.use();
+  //vert
+  this._program.uniforms.screenSize(new Vec2(this.width, this.height));
+  this._program.uniforms.pixelPosition(new Vec2(0, 0));
+  this._program.uniforms.pixelSize(new Vec2(this.width, this.height));
+  //frag
+  velocityTex.bind(0);
+  this._program.uniforms.Velocity(0);
+  obstacleTex.bind(1);
+  this._program.uniforms.Obstacle(1);
+  this._program.uniforms.Width(this.width);
+  this._program.uniforms.Height(this.height);
+  this._program.uniforms.HalfInverseCellSize(0.5 / cellSize);
+  frameRenderer.draw(this._program);
+  destBuffer.unbind();
+
+}
+
+module.exports = DivergenceShader;
+
+},{"pex-geom":36,"pex-glu":54}],11:[function(require,module,exports){
+var glu = require('pex-glu');
+var Context = glu.Context;
+var Program = glu.Program;
+
+var shader  = "#ifdef VERT\n\nattribute vec2 position;\nattribute vec2 texCoord;\nuniform vec2 screenSize;\nuniform vec2 pixelPosition;\nuniform vec2 pixelSize;\nvarying vec2 tc;\n\nvoid main() {\n  float tx = position.x * 0.5 + 0.5; //-1 -> 0, 1 -> 1\n  float ty = -position.y * 0.5 + 0.5; //-1 -> 1, 1 -> 0\n  //(x + 0)/sw * 2 - 1, (x + w)/sw * 2 - 1\n  float x = (pixelPosition.x + pixelSize.x * tx)/screenSize.x * 2.0 - 1.0;  //0 -> -1, 1 -> 1\n  //1.0 - (y + h)/sh * 2, 1.0 - (y + h)/sh * 2\n  float y = 1.0 - (pixelPosition.y + pixelSize.y * ty)/screenSize.y * 2.0;  //0 -> 1, 1 -> -1\n  gl_Position = vec4(x, y, 0.0, 1.0);\n  tc = texCoord;\n}\n\n#endif\n\n#ifdef FRAG\n\nuniform sampler2D Pressure;\nuniform sampler2D Divergence;\nuniform sampler2D Obstacle;\nuniform float Alpha;\nuniform float Width;\nuniform float Height;\nvarying vec2 tc;\n//\t   uniform float InverseBeta = 0.25;\n\nvoid fTexNeighbors(sampler2D tex, vec2 st,\n    out float left, out float right, out float bottom, out float top, vec2 ts) {\n  //float texelSize = 1.0 / 512.0;\n  left   = texture2D(tex, st - vec2(1, 0) / ts ).x;\n  right  = texture2D(tex, st + vec2(1, 0) / ts ).x;\n  bottom = texture2D(tex, st - vec2(0, 1) / ts ).x;\n  top    = texture2D(tex, st + vec2(0, 1) / ts ).x;\n}\n\nvoid fRoundTexNeighbors(sampler2D tex, vec2 st,\n    out float left, out float right, out float bottom, out float top, vec2 ts) {\n  //float texelSize = 1.0 / 512.0;\n  left   = ceil(texture2D(tex, st - vec2(1, 0) / ts ).x - 0.5);\n  right  = ceil(texture2D(tex, st + vec2(1, 0) / ts ).x - 0.5);\n  bottom = ceil(texture2D(tex, st - vec2(0, 1) / ts ).x - 0.5);\n  top    = ceil(texture2D(tex, st + vec2(0, 1) / ts ).x - 0.5);\n}\n\nvoid main() {\n\n  vec2 texelSize = vec2(Width, Height);\n\n  float pL; float pR; float pB; float pT;\n  fTexNeighbors (Pressure, tc, pL, pR, pB, pT, texelSize);\n  float pC = texture2D(Pressure, tc).x;\n\n  float oL; float oR; float oB; float oT;\n  fRoundTexNeighbors (Obstacle, tc, oL, oR, oB, oT, texelSize);\n\n  float bC = texture2D(Divergence, tc ).x;\n\n  pL = pL * (1.0 - oL) + pC * oL;\n  pR = pR * (1.0 - oR) + pC * oR;\n  pB = pB * (1.0 - oB) + pC * oB;\n  pT = pT * (1.0 - oT) + pC * oT;\n\n\n  gl_FragColor = vec4((pL + pR + pB + pT + Alpha * bC) * 0.25, 0.0,0.0,0.0);\n}\n\n#endif\n\n\n\n";
+var Vec2 = require('pex-geom').Vec2;
+
+function JacobiShader (width, height) {
+  this.width = width || 512;
+  this.height = height || 512;
+  this._program = new Program(shader);
+}
+
+JacobiShader.prototype.update = function (options) {
+  var destBuffer = options.destBuffer
+    , backBufferTex = options.backBufferTex
+    , obstacleTex = options.obstacleTex
+    , divergenceTex = options.divergenceTex
+    , cellSize = options.cellSize
+    , frameRenderer = options.frameRenderer;
+
+  if (!destBuffer) throw new Error("no destBuffer");
+  if (!backBufferTex) throw new Error("no backBufferTex");
+  if (!obstacleTex) throw new Error("no obstacleTex");
+  if (!divergenceTex) throw new Error("no divergenceTex");
+  if (!frameRenderer) throw new Error("no frameRenderer");
+
+  destBuffer.bind();
+  this._program.use();
+  //vert
+  this._program.uniforms.screenSize(new Vec2(this.width, this.height));
+  this._program.uniforms.pixelPosition(new Vec2(0, 0));
+  this._program.uniforms.pixelSize(new Vec2(this.width, this.height));
+  //frag
+  backBufferTex.bind(0);
+  this._program.uniforms.Pressure(0);
+  divergenceTex.bind(1);
+  this._program.uniforms.Divergence(1);
+  obstacleTex.bind(2);
+  this._program.uniforms.Obstacle(2);
+  this._program.uniforms.Width(this.width);
+  this._program.uniforms.Height(this.height);
+  this._program.uniforms.Alpha(-cellSize * cellSize);
+  frameRenderer.draw(this._program);
+  destBuffer.unbind();
+
+}
+
+module.exports = JacobiShader;
+
+
+},{"pex-geom":36,"pex-glu":54}],12:[function(require,module,exports){
+var glu = require('pex-glu');
+var Context = glu.Context;
+var Program = glu.Program;
+
+var shader = "#ifdef VERT\n\nattribute vec2 position;\nattribute vec2 texCoord;\nuniform vec2 screenSize;\nuniform vec2 pixelPosition;\nuniform vec2 pixelSize;\nvarying vec2 tc;\n\nvoid main() {\n  float tx = position.x * 0.5 + 0.5; //-1 -> 0, 1 -> 1\n  float ty = -position.y * 0.5 + 0.5; //-1 -> 1, 1 -> 0\n  //(x + 0)/sw * 2 - 1, (x + w)/sw * 2 - 1\n  float x = (pixelPosition.x + pixelSize.x * tx)/screenSize.x * 2.0 - 1.0;  //0 -> -1, 1 -> 1\n  //1.0 - (y + h)/sh * 2, 1.0 - (y + h)/sh * 2\n  float y = 1.0 - (pixelPosition.y + pixelSize.y * ty)/screenSize.y * 2.0;  //0 -> 1, 1 -> -1\n  gl_Position = vec4(x, y, 0.0, 1.0);\n  tc = texCoord;\n}\n\n#endif\n\n#ifdef FRAG\n\nuniform sampler2D Velocity;\nuniform sampler2D Pressure;\nuniform sampler2D Obstacle;\nuniform float Width;\nuniform float Height;\nuniform float HalfInverseCellSize;\nvarying vec2 tc;\n\nvoid fTexNeighbors(sampler2D tex, vec2 st,\n    out float left, out float right, out float bottom, out float top, vec2 ts) {\n  float texelSize = 1.0 / 512.0;\n  left   = texture2D(tex, st - vec2(1, 0) / ts ).x;\n  right  = texture2D(tex, st + vec2(1, 0) / ts ).x;\n  bottom = texture2D(tex, st - vec2(0, 1) / ts ).x;\n  top    = texture2D(tex, st + vec2(0, 1) / ts ).x;\n}\n\nvoid main(){\n\n  vec2 texelSize = vec2(Width, Height);\n\n  float pL; float pR; float pB; float pT;\n  fTexNeighbors (Pressure, tc, pL, pR, pB, pT, texelSize);\n  float pC = texture2D(Pressure, tc).x;\n\n  float oL; float oR; float oB; float oT;\n  fTexNeighbors (Obstacle, tc, oL, oR, oB, oT, texelSize);\n\n  vec2 vMask = vec2(1.0,1.0);\n\n  if (oL > 0.9) { pL = pC; vMask.x = 0.0; }\n  if (oR > 0.9) { pR = pC; vMask.x = 0.0; }\n  if (oB > 0.9) { pB = pC; vMask.y = 0.0; }\n  if (oT > 0.9) { pT = pC; vMask.y = 0.0; }\n\n  vec2 oldV = texture2D(Velocity, tc).xy;\n  vec2 grad = vec2(pR - pL, pT - pB) * HalfInverseCellSize;\n  vec2 newV = oldV - grad;\n\n  gl_FragColor = vec4((vMask * newV), 0.0, 0.0);\n}\n\n#endif\n\n\n\n\n";
+var Vec2 = require('pex-geom').Vec2;
+
+function SubstractGradientShader (width, height) {
+  this.width = width || 512;
+  this.height = height || 512;
+  this._program = new Program(shader);
+}
+
+SubstractGradientShader.prototype.update = function (options) {
+  var destBuffer = options.destBuffer
+    , backBufferTex = options.backBufferTex
+    , pressureTex = options.pressureTex
+    , obstacleTex = options.obstacleTex
+    , cellSize = options.cellSize
+    , frameRenderer = options.frameRenderer;
+
+  if (!destBuffer) throw new Error("no destBuffer");
+  if (!backBufferTex) throw new Error("no backBufferTex");
+  if (!pressureTex) throw new Error("no pressureTex");
+  if (!obstacleTex) throw new Error("no obstacleTex");
+  if (!cellSize) throw new Error("no cellSize");
+  if (!frameRenderer) throw new Error("no frameRenderer");
+
+  destBuffer.bind();
+  this._program.use();
+  //vert
+  this._program.uniforms.screenSize(new Vec2(this.width, this.height));
+  this._program.uniforms.pixelPosition(new Vec2(0, 0));
+  this._program.uniforms.pixelSize(new Vec2(this.width, this.height));
+  //frag
+  backBufferTex.bind(0);
+  this._program.uniforms.Velocity(0);
+  pressureTex.bind(1);
+  this._program.uniforms.Pressure(1);
+  obstacleTex.bind(2);
+  this._program.uniforms.Obstacle(2);
+  this._program.uniforms.Width(this.width);
+  this._program.uniforms.Height(this.height);
+  this._program.uniforms.HalfInverseCellSize(0.5 / cellSize);
+  frameRenderer.draw(this._program);
+  destBuffer.unbind();
+
+}
+
+module.exports = SubstractGradientShader;
+
+
+},{"pex-geom":36,"pex-glu":54}],13:[function(require,module,exports){
 //http://www.clicktorelease.com/blog/creating-spherical-environment-mapping-shader
 
 var glu = require('pex-glu');
@@ -315,7 +1065,7 @@ var Color = color.Color;
 var merge = require('merge');
 
 
-var DisplacedMatCapGLSL = "#ifdef VERT\n\nuniform mat4 projectionMatrix;\nuniform mat4 modelViewMatrix;\nuniform mat4 normalMatrix;\nuniform float time;\nuniform float pointSize;\nattribute vec3 position;\nattribute vec3 normal;\nattribute vec2 texCoord;\n\nvarying vec3 e;\nvarying vec3 n;\n\nuniform sampler2D displacementMap;\nuniform float displacementHeight;\nuniform vec2 textureSize;\nuniform vec2 planeSize;\nuniform float numSteps;\n\nvec3 mod289(vec3 x) {\n    return x - floor(x * (1.0 / 289.0)) * 289.0;\n}\n\nvec4 mod289(vec4 x) {\n    return x - floor(x * (1.0 / 289.0)) * 289.0;\n}\n\nvec4 permute(vec4 x) {\n    return mod289(((x*34.0)+1.0)*x);\n}\n\nvec4 taylorInvSqrt(vec4 r)\n{\n    return 1.79284291400159 - 0.85373472095314 * r;\n}\n\nfloat snoise(vec3 v) {\n    const vec2  C = vec2(1.0/6.0, 1.0/3.0) ;\n    const vec4  D = vec4(0.0, 0.5, 1.0, 2.0);\n\n    // First corner\n    vec3 i  = floor(v + dot(v, C.yyy) );\n    vec3 x0 =   v - i + dot(i, C.xxx) ;\n\n    // Other corners\n    vec3 g = step(x0.yzx, x0.xyz);\n    vec3 l = 1.0 - g;\n    vec3 i1 = min( g.xyz, l.zxy );\n    vec3 i2 = max( g.xyz, l.zxy );\n\n    //   x0 = x0 - 0.0 + 0.0 * C.xxx;\n    //   x1 = x0 - i1  + 1.0 * C.xxx;\n    //   x2 = x0 - i2  + 2.0 * C.xxx;\n    //   x3 = x0 - 1.0 + 3.0 * C.xxx;\n    vec3 x1 = x0 - i1 + C.xxx;\n    vec3 x2 = x0 - i2 + C.yyy; // 2.0*C.x = 1/3 = C.y\n    vec3 x3 = x0 - D.yyy;      // -1.0+3.0*C.x = -0.5 = -D.y\n\n    // Permutations\n    i = mod289(i); \n    vec4 p = permute( permute( permute( \n                    i.z + vec4(0.0, i1.z, i2.z, 1.0 ))\n                + i.y + vec4(0.0, i1.y, i2.y, 1.0 )) \n            + i.x + vec4(0.0, i1.x, i2.x, 1.0 ));\n\n    // Gradients: 7x7 points over a square, mapped onto an octahedron.\n    // The ring size 17*17 = 289 is close to a multiple of 49 (49*6 = 294)\n    float n_ = 0.142857142857; // 1.0/7.0\n    vec3  ns = n_ * D.wyz - D.xzx;\n\n    vec4 j = p - 49.0 * floor(p * ns.z * ns.z);  //  mod(p,7*7)\n\n    vec4 x_ = floor(j * ns.z);\n    vec4 y_ = floor(j - 7.0 * x_ );    // mod(j,N)\n\n    vec4 x = x_ *ns.x + ns.yyyy;\n    vec4 y = y_ *ns.x + ns.yyyy;\n    vec4 h = 1.0 - abs(x) - abs(y);\n\n    vec4 b0 = vec4( x.xy, y.xy );\n    vec4 b1 = vec4( x.zw, y.zw );\n\n    //vec4 s0 = vec4(lessThan(b0,0.0))*2.0 - 1.0;\n    //vec4 s1 = vec4(lessThan(b1,0.0))*2.0 - 1.0;\n    vec4 s0 = floor(b0)*2.0 + 1.0;\n    vec4 s1 = floor(b1)*2.0 + 1.0;\n    vec4 sh = -step(h, vec4(0.0));\n\n    vec4 a0 = b0.xzyw + s0.xzyw*sh.xxyy ;\n    vec4 a1 = b1.xzyw + s1.xzyw*sh.zzww ;\n\n    vec3 p0 = vec3(a0.xy,h.x);\n    vec3 p1 = vec3(a0.zw,h.y);\n    vec3 p2 = vec3(a1.xy,h.z);\n    vec3 p3 = vec3(a1.zw,h.w);\n\n    //Normalise gradients\n    vec4 norm = taylorInvSqrt(vec4(dot(p0,p0), dot(p1,p1), dot(p2, p2), dot(p3,p3)));\n    p0 *= norm.x;\n    p1 *= norm.y;\n    p2 *= norm.z;\n    p3 *= norm.w;\n\n    // Mix final noise value\n    vec4 m = max(0.6 - vec4(dot(x0,x0), dot(x1,x1), dot(x2,x2), dot(x3,x3)), 0.0);\n    m = m * m;\n    return 42.0 * dot( m*m, vec4( dot(p0,x0), dot(p1,x1), \n                dot(p2,x2), dot(p3,x3) ) );\n}\n\nfloat twistedNoise(vec3 p) {\n    float len = length(p);\n    float c = cos(2.0*len);\n    float s = sin(2.0*len);\n    mat2  m = mat2(c,-s,s,c);\n    vec3  q = vec3(m*p.xz,p.y);\n    return (snoise(q + time/5.0) + snoise(q/2.0) + 0.25 * snoise(2.0 * q));\n}\n\nvoid main() {\n    vec3 pos = position;\n    float height = displacementHeight * texture2D(displacementMap, texCoord).r;\n    float heightRight = displacementHeight * texture2D(displacementMap, texCoord + vec2(2.0/textureSize.x, 0.0)).r;\n    float heightFront = displacementHeight * texture2D(displacementMap, texCoord + vec2(0.0, 2.0/textureSize.y)).r;\n\n    height = displacementHeight * texture2D(displacementMap, texCoord).r;\n    heightRight = displacementHeight * texture2D(displacementMap, texCoord + vec2(2.0/textureSize.x, 0.0)).r;\n    heightFront = displacementHeight * texture2D(displacementMap, texCoord + vec2(0.0, 2.0/textureSize.y)).r;\n\n    vec3 right = normalize(vec3(2.0*planeSize.x/numSteps, heightRight, 0.0) - vec3(0.0, height, 0.0));\n    vec3 front = normalize(vec3(0.0, heightFront, 2.0*planeSize.y/numSteps) - vec3(0.0, height, 0.0));\n    vec3 up = normalize(cross(right, -front));\n\n    vec3 N = up;\n\n    pos.y += height;\n    gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);\n\n    e = normalize(vec3(modelViewMatrix * vec4(position, 1.0)));\n    n = normalize(vec3(normalMatrix * vec4(N, 1.0)));\n}\n\n#endif\n\n#ifdef FRAG\n\nuniform vec4 tint;\nuniform sampler2D texture;\nuniform bool showNormals;\n\nvarying vec3 e;\nvarying vec3 n;\n\n\nvoid main() {\n    vec3 r = (reflect(e, n));\n    float m = 2.0 * sqrt(r.x * r.x + r.y * r.y + (r.z + 1.0) * (r.z + 1.0));\n    vec2 N = r.xy / m + 0.5;\n    vec3 base = texture2D( texture, N ).rgb;\n    //  base.y = snoise(base);\n    //  base.z = snoise(base);\n\n    if (length(tint.xyz) > 0.0) {\n        gl_FragColor = tint;\n    }\n    else {\n        gl_FragColor = vec4( base, 1.0 );\n    }\n\n    if (showNormals) {\n        gl_FragColor = vec4(n * 0.5 + 0.5, 1.0);\n    }\n}\n\n#endif\n";
+var DisplacedMatCapGLSL = "#ifdef VERT\n\nuniform mat4 projectionMatrix;\nuniform mat4 modelViewMatrix;\nuniform mat4 normalMatrix;\nuniform float time;\nuniform float pointSize;\nattribute vec3 position;\nattribute vec3 normal;\nattribute vec2 texCoord;\n\nvarying vec3 e;\nvarying vec3 n;\nvarying vec3 p;\n\nuniform sampler2D displacementMap;\nuniform float displacementHeight;\nuniform vec2 textureSize;\nuniform vec2 planeSize;\nuniform float numSteps;\n\n\nvoid main() {\n    vec3 pos = position;\n    float height = displacementHeight * texture2D(displacementMap, texCoord).r;\n\n    float heightRight =\n                  displacementHeight *\n                  texture2D(displacementMap, texCoord + vec2(2.0/textureSize.x, 0.0)).r;\n\n    float heightFront =\n                  displacementHeight *\n                  texture2D(displacementMap, texCoord + vec2(0.0, 2.0/textureSize.y)).r;\n\n    height = displacementHeight * texture2D(displacementMap, texCoord).r;\n    heightRight =\n              displacementHeight *\n              texture2D(displacementMap, texCoord + vec2(2.0/textureSize.x, 0.0)).r;\n\n    heightFront =\n              displacementHeight *\n              texture2D(displacementMap, texCoord + vec2(0.0, 2.0/textureSize.y)).r;\n\n    vec3 right =\n              normalize(vec3(2.0*planeSize.x/numSteps, heightRight, 0.0) -\n              vec3(0.0, height, 0.0));\n\n    vec3 front =\n              normalize(vec3(0.0, heightFront, 2.0*planeSize.y/numSteps) -\n              vec3(0.0, height, 0.0));\n\n    vec3 up = normalize(cross(right, -front));\n\n    vec3 N = up;\n\n    pos.z += height * 5.0;\n    gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);\n\n    e = normalize(vec3(modelViewMatrix * vec4(position, 1.0)));\n    n = normalize(vec3(normalMatrix * vec4(N, 1.0)));\n    p = pos;\n}\n\n#endif\n\n#ifdef FRAG\n\nuniform vec4 tint;\nuniform sampler2D texture;\nuniform bool showNormals;\n\nvarying vec3 e;\nvarying vec3 n;\nvarying vec3 p;\n\n\nvoid main() {\n    vec3 r = (reflect(e, n));\n    float m = 2.0 * sqrt(r.x * r.x + r.y * r.y + (r.z + 1.0) * (r.z + 1.0));\n    vec2 N = r.xy / m + 0.5;\n    vec3 base = texture2D( texture, N ).rgb;\n\n    if (length(tint.xyz) > 0.0) {\n        gl_FragColor = tint;\n    }\n    else {\n        gl_FragColor = vec4( base, 1.0 );\n    }\n\n    if (showNormals) {\n        gl_FragColor = vec4(n * 0.5 + 0.5, 1.0);\n    }\n\n    if (p.z < 0.0001) discard;\n}\n\n#endif\n";
 
 function DisplacedMatCap(uniforms) {
   this.gl = Context.currentContext;
@@ -329,9 +1079,9 @@ DisplacedMatCap.prototype = Object.create(Material.prototype);
 
 module.exports = DisplacedMatCap;
 
-},{"merge":7,"pex-color":8,"pex-glu":44}],4:[function(require,module,exports){
+},{"merge":17,"pex-color":18,"pex-glu":54}],14:[function(require,module,exports){
 
-},{}],5:[function(require,module,exports){
+},{}],15:[function(require,module,exports){
 (function (process){
 // Copyright Joyent, Inc. and other Node contributors.
 //
@@ -559,7 +1309,7 @@ var substr = 'ab'.substr(-1) === 'b'
 ;
 
 }).call(this,require('_process'))
-},{"_process":6}],6:[function(require,module,exports){
+},{"_process":16}],16:[function(require,module,exports){
 // shim for using process in browser
 
 var process = module.exports = {};
@@ -619,7 +1369,7 @@ process.chdir = function (dir) {
 };
 process.umask = function() { return 0; };
 
-},{}],7:[function(require,module,exports){
+},{}],17:[function(require,module,exports){
 /*!
  * @name JavaScript/NodeJS Merge v1.2.0
  * @author yeikos
@@ -795,9 +1545,9 @@ process.umask = function() { return 0; };
 	}
 
 })(typeof module === 'object' && module && typeof module.exports === 'object' && module.exports);
-},{}],8:[function(require,module,exports){
+},{}],18:[function(require,module,exports){
 module.exports.Color = require('./lib/Color');
-},{"./lib/Color":9}],9:[function(require,module,exports){
+},{"./lib/Color":19}],19:[function(require,module,exports){
 //Color utility class
 
 //## Example use
@@ -1294,12 +2044,12 @@ Color.Orange = new Color(1, 0.5, 0, 1);
 
 module.exports = Color;
 
-},{"lerp":10}],10:[function(require,module,exports){
+},{"lerp":20}],20:[function(require,module,exports){
 function lerp(v0, v1, t) {
     return v0*(1-t)+v1*t
 }
 module.exports = lerp
-},{}],11:[function(require,module,exports){
+},{}],21:[function(require,module,exports){
 module.exports.Plane = require('./lib/Plane');
 module.exports.Cube = require('./lib/Cube');
 module.exports.Box = require('./lib/Box');
@@ -1313,7 +2063,7 @@ module.exports.LineBuilder = require('./lib/LineBuilder');
 module.exports.Loft = require('./lib/Loft');
 module.exports.IsoSurface = require('./lib/IsoSurface');
 module.exports.Cylinder = require('./lib/Cylinder');
-},{"./lib/Box":12,"./lib/Cube":13,"./lib/Cylinder":14,"./lib/Dodecahedron":15,"./lib/HexSphere":16,"./lib/Icosahedron":17,"./lib/IsoSurface":18,"./lib/LineBuilder":19,"./lib/Loft":20,"./lib/Octahedron":21,"./lib/Plane":22,"./lib/Sphere":23,"./lib/Tetrahedron":24}],12:[function(require,module,exports){
+},{"./lib/Box":22,"./lib/Cube":23,"./lib/Cylinder":24,"./lib/Dodecahedron":25,"./lib/HexSphere":26,"./lib/Icosahedron":27,"./lib/IsoSurface":28,"./lib/LineBuilder":29,"./lib/Loft":30,"./lib/Octahedron":31,"./lib/Plane":32,"./lib/Sphere":33,"./lib/Tetrahedron":34}],22:[function(require,module,exports){
 //Like cube but not subdivided and continuous on edges
 
 //## Parent class : [geom.Geometry](../pex-geom/Geometry.html)
@@ -1378,7 +2128,7 @@ Box.prototype = Object.create(Geometry.prototype);
 
 module.exports = Box;
 
-},{"pex-geom":26}],13:[function(require,module,exports){
+},{"pex-geom":36}],23:[function(require,module,exports){
 //Cube geometry generator.
 
 //## Parent class : [geom.Geometry](../pex-geom/Geometry.html)
@@ -1466,7 +2216,7 @@ Cube.prototype = Object.create(Geometry.prototype);
 
 module.exports = Cube;
 
-},{"pex-geom":26}],14:[function(require,module,exports){
+},{"pex-geom":36}],24:[function(require,module,exports){
 //Cylinder geometry generator.
 
 //## Parent class : [geom.Geometry](../pex-geom/Geometry.html)
@@ -1576,7 +2326,7 @@ Cylinder.prototype = Object.create(Geometry.prototype);
 
 module.exports = Cylinder;
 
-},{"pex-geom":26}],15:[function(require,module,exports){
+},{"pex-geom":36}],25:[function(require,module,exports){
 //Dodecahedron geometry generator.
 //Based on http://paulbourke.net/geometry/platonic/
 
@@ -1681,7 +2431,7 @@ function Dodecahedron(r) {
 Dodecahedron.prototype = Object.create(Geometry.prototype);
 
 module.exports = Dodecahedron;
-},{"pex-geom":26}],16:[function(require,module,exports){
+},{"pex-geom":36}],26:[function(require,module,exports){
 //HexSphere geometry generator.
 
 //## Parent class : [geom.Geometry](../pex-geom/Geometry.html)
@@ -1781,7 +2531,7 @@ function centroid(points) {
 function elements(list, indices) {
   return indices.map(function(i) { return list[i]; })
 }
-},{"./Icosahedron":17,"pex-geom":26}],17:[function(require,module,exports){
+},{"./Icosahedron":27,"pex-geom":36}],27:[function(require,module,exports){
 //Icosahedron geometry generator.
 //Based on http://paulbourke.net/geometry/platonic/
 
@@ -1883,7 +2633,7 @@ function Icosahedron(r) {
 Icosahedron.prototype = Object.create(Geometry.prototype);
 
 module.exports = Icosahedron;
-},{"pex-geom":26}],18:[function(require,module,exports){
+},{"pex-geom":36}],28:[function(require,module,exports){
 //Marching Cubes implementation
 
 //## Parent class : [Geometry](../pex-geom/Geometry.html)
@@ -2391,7 +3141,7 @@ var TriangleConnectionTable = [
 ];
 
 module.exports = IsoSurface;
-},{"pex-geom":26}],19:[function(require,module,exports){
+},{"pex-geom":36}],29:[function(require,module,exports){
 //Line based geometry generator useful for debugging.
 
 //## Parent class : [Geometry](../pex-geom/Geometry.html)
@@ -2500,7 +3250,7 @@ LineBuilder.prototype.reset = function() {
 
 module.exports = LineBuilder;
 
-},{"pex-geom":26}],20:[function(require,module,exports){
+},{"pex-geom":36}],30:[function(require,module,exports){
 //Loft geometry generator.  
 //Extruded 2d shape along a 3d curve.  
 
@@ -2788,7 +3538,7 @@ function clamp(value, min, max) {
 
 module.exports = Loft;
 
-},{"./LineBuilder":19,"merge":25,"pex-geom":26}],21:[function(require,module,exports){
+},{"./LineBuilder":29,"merge":35,"pex-geom":36}],31:[function(require,module,exports){
 //Octahedron geometry generator.
 //Based on http://paulbourke.net/geometry/platonic/
 
@@ -2856,7 +3606,7 @@ function Octahedron(r) {
 Octahedron.prototype = Object.create(Geometry.prototype);
 
 module.exports = Octahedron;
-},{"pex-geom":26}],22:[function(require,module,exports){
+},{"pex-geom":36}],32:[function(require,module,exports){
 //Plane geometry generator.
 
 //## Parent class : [Geometry](../pex-geom/Geometry.html)
@@ -2949,7 +3699,7 @@ function Plane(su, sv, nu, nv, u, v) {
 Plane.prototype = Object.create(Geometry.prototype);
 
 module.exports = Plane;
-},{"pex-geom":26}],23:[function(require,module,exports){
+},{"pex-geom":36}],33:[function(require,module,exports){
 //Sphere geometry generator.
 
 //## Parent class : [Geometry](../pex-geom/Geometry.html)
@@ -3039,7 +3789,7 @@ Sphere.prototype = Object.create(Geometry.prototype);
 
 module.exports = Sphere;
 
-},{"pex-geom":26}],24:[function(require,module,exports){
+},{"pex-geom":36}],34:[function(require,module,exports){
 //Tetrahedron geometry generator.
 //Based on http://mathworld.wolfram.com/RegularTetrahedron.html
 
@@ -3092,7 +3842,7 @@ function Tetrahedron(r) {
 Tetrahedron.prototype = Object.create(Geometry.prototype);
 
 module.exports = Tetrahedron;
-},{"pex-geom":26}],25:[function(require,module,exports){
+},{"pex-geom":36}],35:[function(require,module,exports){
 /*!
  * @name JavaScript/NodeJS Merge v1.1.3
  * @author yeikos
@@ -3174,7 +3924,7 @@ module.exports = Tetrahedron;
 	}
 
 })(typeof module === 'object' && module && typeof module.exports === 'object' && module.exports);
-},{}],26:[function(require,module,exports){
+},{}],36:[function(require,module,exports){
 module.exports.Vec2 = require('./lib/Vec2');
 module.exports.Vec3 = require('./lib/Vec3');
 module.exports.Vec4 = require('./lib/Vec4');
@@ -3192,7 +3942,7 @@ module.exports.BoundingBox = require('./lib/BoundingBox');
 module.exports.Triangle2D = require('./lib/Triangle2D');
 module.exports.Triangle3D = require('./lib/Triangle3D');
 module.exports.Octree = require('./lib/Octree');
-},{"./lib/BoundingBox":27,"./lib/Geometry":28,"./lib/Mat4":29,"./lib/Octree":30,"./lib/Path":31,"./lib/Plane":32,"./lib/Quat":33,"./lib/Ray":34,"./lib/Rect":35,"./lib/Spline1D":36,"./lib/Spline2D":37,"./lib/Spline3D":38,"./lib/Triangle2D":39,"./lib/Triangle3D":40,"./lib/Vec2":41,"./lib/Vec3":42,"./lib/Vec4":43}],27:[function(require,module,exports){
+},{"./lib/BoundingBox":37,"./lib/Geometry":38,"./lib/Mat4":39,"./lib/Octree":40,"./lib/Path":41,"./lib/Plane":42,"./lib/Quat":43,"./lib/Ray":44,"./lib/Rect":45,"./lib/Spline1D":46,"./lib/Spline2D":47,"./lib/Spline3D":48,"./lib/Triangle2D":49,"./lib/Triangle3D":50,"./lib/Vec2":51,"./lib/Vec3":52,"./lib/Vec4":53}],37:[function(require,module,exports){
 //A bounding box is a box with the smallest possible measure 
 //(area for 2D or volume for 3D) for a given geometry or a set of points
 //
@@ -3288,7 +4038,7 @@ BoundingBox.prototype.contains = function(p) {
 module.exports = BoundingBox;
 
 
-},{"./Vec3":42}],28:[function(require,module,exports){
+},{"./Vec3":52}],38:[function(require,module,exports){
 //A collection of vertices, vertex attributes and faces or edges defining a 3d shape.
 //(area for 2D or volume for 3D) for a given geometry or a set of points
 //
@@ -4344,7 +5094,7 @@ function move(a, b, t) {
 
 module.exports = Geometry;
 
-},{"./BoundingBox":27,"./Ray":34,"./Vec3":42}],29:[function(require,module,exports){
+},{"./BoundingBox":37,"./Ray":44,"./Vec3":52}],39:[function(require,module,exports){
 //A 4 by 4 Matrix
 //## Example use
 //     var mat4 = new Mat4()
@@ -4817,7 +5567,7 @@ Mat4.prototype.fromArray = function(a) {
 module.exports = Mat4;
 
 
-},{"./Vec3":42}],30:[function(require,module,exports){
+},{"./Vec3":52}],40:[function(require,module,exports){
 //3D Three data structure for fast spatial point indexing
 //## Example use
 //      var octree = new Octree(new Vec3(-1,-1,1), new Vec3(2,2,2));
@@ -5119,7 +5869,7 @@ Octree.Cell.prototype.findNearbyPoints = function (p, r, result, options) {
 
 module.exports = Octree;
 
-},{"pex-geom":26}],31:[function(require,module,exports){
+},{"pex-geom":36}],41:[function(require,module,exports){
 //Path of points
 //
 //## Example use
@@ -5284,7 +6034,7 @@ Path.prototype.precalculateLength = function() {
 module.exports = Path;
 
 
-},{"./Vec3":42}],32:[function(require,module,exports){
+},{"./Vec3":52}],42:[function(require,module,exports){
 //A plane represented by a point and a normal vector perpendicular to the plane's surface.
 //
 //Methematical construct not a 3d geometry mesh.
@@ -5381,7 +6131,7 @@ Plane.prototype.updateUV = function() {
 }
 
 module.exports = Plane;
-},{"./Vec2":41,"./Vec3":42}],33:[function(require,module,exports){
+},{"./Vec2":51,"./Vec3":52}],43:[function(require,module,exports){
 //A Quaternion (x, y, z, w)
 //## Example use
 //     var q = new Quat().fromDirection(new Vec3(1, 1, 1));
@@ -5720,7 +6470,7 @@ Quat.fromDirection = function(direction) {
 
 module.exports = Quat;
 
-},{"./Mat4":29,"./Vec3":42}],34:[function(require,module,exports){
+},{"./Mat4":39,"./Vec3":52}],44:[function(require,module,exports){
 //A ray.
 //
 //Consists of the starting point *origin* and the *direction* vector.  
@@ -5942,7 +6692,7 @@ Ray.prototype.hitTestTriangle = function(triangle) {
 
 module.exports = Ray;
 
-},{"./Vec3":42}],35:[function(require,module,exports){
+},{"./Vec3":52}],45:[function(require,module,exports){
 //2D Rect (x, y, width, height) or (min, max)
 //## Example use
 //      var rect = new Rect(new Vec2(-1, -1), new Vec2(1, 1));
@@ -6090,7 +6840,7 @@ Rect.fromPoints = function(points) {
 }
 
 module.exports = Rect;
-},{"pex-geom":26}],36:[function(require,module,exports){
+},{"pex-geom":36}],46:[function(require,module,exports){
 //Camtull-Rom spline implementation  
 //Inspired by code from [Tween.js][1]
 //[1]: http://sole.github.com/tween.js/examples/05_spline.html
@@ -6289,7 +7039,7 @@ Spline1D.prototype.interpolate = function(p0, p1, p2, p3, t) {
 
 module.exports = Spline1D;
 
-},{}],37:[function(require,module,exports){
+},{}],47:[function(require,module,exports){
 //Camtull-Rom spline implementation  
 //Inspired by code from [Tween.js][1]
 //[1]: http://sole.github.com/tween.js/examples/05_spline.html
@@ -6496,7 +7246,7 @@ Spline2D.prototype.interpolate = function (p0, p1, p2, p3, t) {
 };
 
 module.exports = Spline2D;
-},{"./Vec2":41}],38:[function(require,module,exports){
+},{"./Vec2":51}],48:[function(require,module,exports){
 //Camtull-Rom spline implementation  
 //Inspired by code from [Tween.js][1]
 //[1]: http://sole.github.com/tween.js/examples/05_spline.html
@@ -6712,7 +7462,7 @@ Spline3D.prototype.interpolate = function (p0, p1, p2, p3, t) {
 };
 
 module.exports = Spline3D;
-},{"./Vec3":42}],39:[function(require,module,exports){
+},{"./Vec3":52}],49:[function(require,module,exports){
 //2D triangle.
 //
 //Consists of three 2D points: a, b, c
@@ -6762,7 +7512,7 @@ function sign(a, b, c) {
 }
 
 module.exports = Triangle2D;
-},{}],40:[function(require,module,exports){
+},{}],50:[function(require,module,exports){
 //3D triangle.
 //
 //Consists of three 3D points: a, b, c
@@ -6796,7 +7546,7 @@ Triangle3D.prototype.getArea = function() {
 }
 
 module.exports = Triangle3D;
-},{}],41:[function(require,module,exports){
+},{}],51:[function(require,module,exports){
 //2D Vector (x, y)
 //## Example use
 //      var position = new Vec2(0, 0);
@@ -7063,7 +7813,7 @@ Vec2.prototype.hash = function() {
 
 module.exports = Vec2;
 
-},{}],42:[function(require,module,exports){
+},{}],52:[function(require,module,exports){
 //3D Vector (x, y, z)
 //## Example use
 //      var right = new Vec3(0, 1, 0);
@@ -7376,7 +8126,7 @@ Vec3.Zero = new Vec3(0, 0, 0);
 
 module.exports = Vec3;
 
-},{}],43:[function(require,module,exports){
+},{}],53:[function(require,module,exports){
 //4D Vector (x, y, z, w)
 //## Example use
 //      var a = new Vec4(0.2, 0.4, 3.3, 1.0);
@@ -7478,7 +8228,7 @@ Vec4.prototype.hash = function() {
 
 module.exports = Vec4;
 
-},{}],44:[function(require,module,exports){
+},{}],54:[function(require,module,exports){
 module.exports.Context = require('./lib/Context');
 module.exports.Texture = require('./lib/Texture');
 module.exports.Texture2D = require('./lib/Texture2D');
@@ -7499,7 +8249,7 @@ for(var funcName in Utils) {
 }
 
 
-},{"./lib/Arcball":45,"./lib/Context":47,"./lib/Material":48,"./lib/Mesh":49,"./lib/OrthographicCamera":50,"./lib/PerspectiveCamera":51,"./lib/Program":52,"./lib/RenderTarget":53,"./lib/ScreenImage":55,"./lib/Texture":56,"./lib/Texture2D":57,"./lib/TextureCube":58,"./lib/Utils":59}],45:[function(require,module,exports){
+},{"./lib/Arcball":55,"./lib/Context":57,"./lib/Material":58,"./lib/Mesh":59,"./lib/OrthographicCamera":60,"./lib/PerspectiveCamera":61,"./lib/Program":62,"./lib/RenderTarget":63,"./lib/ScreenImage":65,"./lib/Texture":66,"./lib/Texture2D":67,"./lib/TextureCube":68,"./lib/Utils":69}],55:[function(require,module,exports){
 var geom = require('pex-geom');
 var Vec2 = geom.Vec2;
 var Vec3 = geom.Vec3;
@@ -7662,7 +8412,7 @@ Arcball.prototype.setDistance = function(distance) {
 };
 
 module.exports = Arcball;
-},{"pex-geom":26}],46:[function(require,module,exports){
+},{"pex-geom":36}],56:[function(require,module,exports){
 var geom = require('pex-geom');
 var Vec2 = geom.Vec2;
 var Vec3 = geom.Vec3;
@@ -7823,7 +8573,7 @@ Buffer.prototype.update = function(data, usage) {
 
 module.exports = Buffer;
 
-},{"./Context":47,"pex-color":8,"pex-geom":26}],47:[function(require,module,exports){
+},{"./Context":57,"pex-color":18,"pex-geom":36}],57:[function(require,module,exports){
 var sys = require('pex-sys');
 
 var currentGLContext = null;
@@ -7851,63 +8601,36 @@ Object.defineProperty(Context, 'currentContext', {
 });
 
 module.exports = Context;
-},{"pex-sys":82}],48:[function(require,module,exports){
+},{"pex-sys":92}],58:[function(require,module,exports){
 var Context = require('./Context');
 
 function Material(program, uniforms) {
   this.gl = Context.currentContext;
   this.program = program;
   this.uniforms = uniforms || {};
-  this.prevUniforms = {};
-  this.missingUniforms = {};
 }
 
 Material.prototype.use = function () {
   this.program.use();
   var numTextures = 0;
   for (var name in this.program.uniforms) {
-    if (this.uniforms[name] == null) {
-      if (name.indexOf('[') == -1) { //don't warn for arrays
-        if (!this.missingUniforms[name]) {
-          this.missingUniforms[name] = 0;
-        }
-        this.missingUniforms[name]++;
-        //print log message only once, on second frame
-        if (this.missingUniforms[name] == 2) {
-          console.log('WARN', 'Uniform', name, 'is null');
-        }
-      }
-    }
-    else if (this.program.uniforms[name].type == this.gl.SAMPLER_2D || this.program.uniforms[name].type == this.gl.SAMPLER_CUBE) {
+    if (this.program.uniforms[name].type == this.gl.SAMPLER_2D || this.program.uniforms[name].type == this.gl.SAMPLER_CUBE) {
       this.gl.activeTexture(this.gl.TEXTURE0 + numTextures);
-      if (this.uniforms[name].width > 0 && this.uniforms[name].height > 0) {
+      //bind only loaded / initialized textures
+      if (this.uniforms[name] && this.uniforms[name].width > 0 && this.uniforms[name].height > 0) {
         this.gl.bindTexture(this.uniforms[name].target, this.uniforms[name].handle);
         this.program.uniforms[name](numTextures);
       }
       numTextures++;
     }
-    else {
-      var newValue = this.uniforms[name];
-      var oldValue = this.prevUniforms[name];
-      var newHash = null;
-      if (oldValue !== null) {
-        if (newValue && newValue.hash) {
-          newHash = newValue.hash();
-          if (newHash == oldValue) {
-            continue;
-          }
-        } else if (newValue == oldValue) {
-          continue;
-        }
-      }
+    else if (this.uniforms[name]) {
       this.program.uniforms[name](this.uniforms[name]);
-      this.prevUniforms[name] = newHash ? newHash : newValue;
     }
   }
 };
 
 module.exports = Material;
-},{"./Context":47}],49:[function(require,module,exports){
+},{"./Context":57}],59:[function(require,module,exports){
 var merge = require('merge');
 var geom = require('pex-geom')
 var Context = require('./Context');
@@ -8194,7 +8917,7 @@ Mesh.prototype.updateBoundingBox = function() {
 
 module.exports = Mesh;
 
-},{"./Context":47,"./RenderableGeometry":54,"merge":7,"pex-geom":26}],50:[function(require,module,exports){
+},{"./Context":57,"./RenderableGeometry":64,"merge":17,"pex-geom":36}],60:[function(require,module,exports){
 var geom = require('pex-geom');
 var Vec2 = geom.Vec2;
 var Vec3 = geom.Vec3;
@@ -8345,7 +9068,7 @@ OrthographicCamera.prototype.getWorldRay = function(x, y, windowWidth, windowHei
 
 module.exports = OrthographicCamera;
 
-},{"pex-geom":26}],51:[function(require,module,exports){
+},{"pex-geom":36}],61:[function(require,module,exports){
 var geom = require('pex-geom');
 var Vec2 = geom.Vec2;
 var Vec3 = geom.Vec3;
@@ -8503,7 +9226,7 @@ PerspectiveCamera.prototype.getWorldRay = function(x, y, windowWidth, windowHeig
 
 module.exports = PerspectiveCamera;
 
-},{"pex-geom":26}],52:[function(require,module,exports){
+},{"pex-geom":36}],62:[function(require,module,exports){
 var Context = require('./Context');
 var sys = require('pex-sys');
 var IO = sys.IO;
@@ -8602,10 +9325,7 @@ Program.prototype.link = function() {
 };
 
 Program.prototype.use = function() {
-  if (Program.currentProgram !== this.handle) {
-    Program.currentProgram = this.handle;
-    return this.gl.useProgram(this.handle);
-  }
+  return this.gl.useProgram(this.handle);
 };
 
 Program.prototype.dispose = function() {
@@ -8716,7 +9436,7 @@ Program.makeUniformSetter = function(gl, type, location) {
 };
 
 module.exports = Program;
-},{"./Context":47,"pex-sys":82}],53:[function(require,module,exports){
+},{"./Context":57,"pex-sys":92}],63:[function(require,module,exports){
 var Context = require('./Context');
 var Texture2D = require('./Texture2D');
 var merge = require('merge');
@@ -8868,7 +9588,8 @@ RenderTarget.prototype.getDepthAttachement = function() {
 }
 
  module.exports = RenderTarget;
-},{"./Context":47,"./Texture2D":57,"merge":7,"pex-sys":82}],54:[function(require,module,exports){
+
+},{"./Context":57,"./Texture2D":67,"merge":17,"pex-sys":92}],64:[function(require,module,exports){
 var Geometry = require('pex-geom').Geometry;
 var Context = require('./Context');
 var Buffer = require('./Buffer');
@@ -8925,7 +9646,7 @@ var RenderableGeometry = {
 
 module.exports = RenderableGeometry;
 
-},{"./Buffer":46,"./Context":47,"pex-geom":26}],55:[function(require,module,exports){
+},{"./Buffer":56,"./Context":57,"pex-geom":36}],65:[function(require,module,exports){
 var geom = require('pex-geom');
 var Vec2 = geom.Vec2;
 var Geometry = geom.Geometry;
@@ -9030,7 +9751,7 @@ ScreenImage.prototype.draw = function (image, program) {
 };
 
 module.exports = ScreenImage;
-},{"./Material":48,"./Mesh":49,"./Program":52,"pex-geom":26}],56:[function(require,module,exports){
+},{"./Material":58,"./Mesh":59,"./Program":62,"pex-geom":36}],66:[function(require,module,exports){
 var Context = require('./Context');
 
 function Texture(target) {
@@ -9058,7 +9779,7 @@ Texture.prototype.bind = function(unit) {
 };
 
 module.exports = Texture;
-},{"./Context":47}],57:[function(require,module,exports){
+},{"./Context":57}],67:[function(require,module,exports){
 var sys = require('pex-sys');
 var merge = require('merge');
 var IO = sys.IO;
@@ -9095,6 +9816,7 @@ Texture2D.create = function(w, h, options) {
   texture.bind();
 
   texture.checkExtensions(options);
+
 
   gl.texImage2D(gl.TEXTURE_2D, 0, options.internalFormat, w, h, 0, options.format, options.type, null);
 
@@ -9274,7 +9996,8 @@ Texture2D.prototype.generateMipmap = function() {
 }
 
 module.exports = Texture2D;
-},{"./Context":47,"./Texture":56,"merge":7,"pex-sys":82}],58:[function(require,module,exports){
+
+},{"./Context":57,"./Texture":66,"merge":17,"pex-sys":92}],68:[function(require,module,exports){
 var sys = require('pex-sys');
 var IO = sys.IO;
 var Platform = sys.Platform;
@@ -9369,7 +10092,7 @@ TextureCube.prototype.dispose = function () {
 
 module.exports = TextureCube;
 
-},{"./Context":47,"./Texture":56,"merge":7,"pex-sys":82}],59:[function(require,module,exports){
+},{"./Context":57,"./Texture":66,"merge":17,"pex-sys":92}],69:[function(require,module,exports){
 var Context = require('./Context');
 
 module.exports.getCurrentContext = function() {
@@ -9495,9 +10218,9 @@ module.exports.lineWidth = function(width) {
   gl.lineWidth(width);
   return this;
 }
-},{"./Context":47}],60:[function(require,module,exports){
+},{"./Context":57}],70:[function(require,module,exports){
 module.exports.GUI = require('./lib/GUI');
-},{"./lib/GUI":61}],61:[function(require,module,exports){
+},{"./lib/GUI":71}],71:[function(require,module,exports){
 var glu = require('pex-glu');
 var geom = require('pex-geom');
 var sys = require('pex-sys');
@@ -10137,7 +10860,7 @@ GUI.prototype.toggleEnabled = function() {
 
 module.exports = GUI;
 
-},{"./GUIControl":62,"./HTMLCanvasRenderer":63,"./SkiaRenderer":64,"pex-color":8,"pex-geom":26,"pex-glu":44,"pex-sys":82}],62:[function(require,module,exports){
+},{"./GUIControl":72,"./HTMLCanvasRenderer":73,"./SkiaRenderer":74,"pex-color":18,"pex-geom":36,"pex-glu":54,"pex-sys":92}],72:[function(require,module,exports){
 function GUIControl(o) {
   for (var i in o) {
     this[i] = o[i];
@@ -10331,7 +11054,7 @@ GUIControl.prototype.getStrValue = function() {
 
 module.exports = GUIControl;
 GUIControl;
-},{}],63:[function(require,module,exports){
+},{}],73:[function(require,module,exports){
 var glu = require('pex-glu');
 var geom = require('pex-geom');
 var plask = require('plask');
@@ -10601,7 +11324,7 @@ HTMLCanvasRenderer.prototype.updateTexture = function () {
 
 module.exports = HTMLCanvasRenderer;
 
-},{"pex-geom":26,"pex-glu":44,"plask":4}],64:[function(require,module,exports){
+},{"pex-geom":36,"pex-glu":54,"plask":14}],74:[function(require,module,exports){
 var glu = require('pex-glu');
 var geom = require('pex-geom');
 var plask = require('plask');
@@ -10941,7 +11664,7 @@ SkiaRenderer.prototype.updateTexture = function() {
 
 module.exports = SkiaRenderer;
 
-},{"pex-geom":26,"pex-glu":44,"plask":4}],65:[function(require,module,exports){
+},{"pex-geom":36,"pex-glu":54,"plask":14}],75:[function(require,module,exports){
 module.exports.SolidColor = require('./lib/SolidColor');
 module.exports.ShowNormals = require('./lib/ShowNormals');
 module.exports.ShowColors = require('./lib/ShowColors');
@@ -10958,7 +11681,7 @@ module.exports.MatCap = require('./lib/MatCap');
 module.exports.Diffuse = require('./lib/Diffuse');
 module.exports.BlinnPhong = require('./lib/BlinnPhong');
 module.exports.ShowDepth = require('./lib/ShowDepth');
-},{"./lib/BlinnPhong":66,"./lib/Diffuse":67,"./lib/FlatToonShading":68,"./lib/MatCap":69,"./lib/ShowColors":70,"./lib/ShowDepth":71,"./lib/ShowNormals":72,"./lib/ShowPosition":73,"./lib/ShowTexCoords":74,"./lib/SkyBox":75,"./lib/SkyBoxEnvMap":76,"./lib/SolidColor":77,"./lib/Textured":78,"./lib/TexturedCubeMap":79,"./lib/TexturedEnvMap":80,"./lib/TexturedTriPlanar":81}],66:[function(require,module,exports){
+},{"./lib/BlinnPhong":76,"./lib/Diffuse":77,"./lib/FlatToonShading":78,"./lib/MatCap":79,"./lib/ShowColors":80,"./lib/ShowDepth":81,"./lib/ShowNormals":82,"./lib/ShowPosition":83,"./lib/ShowTexCoords":84,"./lib/SkyBox":85,"./lib/SkyBoxEnvMap":86,"./lib/SolidColor":87,"./lib/Textured":88,"./lib/TexturedCubeMap":89,"./lib/TexturedEnvMap":90,"./lib/TexturedTriPlanar":91}],76:[function(require,module,exports){
 var glu = require('pex-glu');
 var color = require('pex-color');
 var geom = require('pex-geom');
@@ -10993,7 +11716,7 @@ BlinnPhong.prototype = Object.create(Material.prototype);
 
 module.exports = BlinnPhong;
 
-},{"merge":7,"pex-color":8,"pex-geom":26,"pex-glu":44}],67:[function(require,module,exports){
+},{"merge":17,"pex-color":18,"pex-geom":36,"pex-glu":54}],77:[function(require,module,exports){
 var glu = require('pex-glu');
 var color = require('pex-color');
 var geom = require('pex-geom');
@@ -11024,7 +11747,7 @@ function Diffuse(uniforms) {
 Diffuse.prototype = Object.create(Material.prototype);
 
 module.exports = Diffuse;
-},{"merge":7,"pex-color":8,"pex-geom":26,"pex-glu":44}],68:[function(require,module,exports){
+},{"merge":17,"pex-color":18,"pex-geom":36,"pex-glu":54}],78:[function(require,module,exports){
 var glu = require('pex-glu');
 var color = require('pex-color');
 var geom = require('pex-geom');
@@ -11056,7 +11779,7 @@ function FlatToonShading(uniforms) {
 FlatToonShading.prototype = Object.create(Material.prototype);
 
 module.exports = FlatToonShading;
-},{"merge":7,"pex-color":8,"pex-geom":26,"pex-glu":44}],69:[function(require,module,exports){
+},{"merge":17,"pex-color":18,"pex-geom":36,"pex-glu":54}],79:[function(require,module,exports){
 //http://www.clicktorelease.com/blog/creating-spherical-environment-mapping-shader
 
 var glu = require('pex-glu');
@@ -11082,7 +11805,7 @@ MatCap.prototype = Object.create(Material.prototype);
 
 module.exports = MatCap;
 
-},{"merge":7,"pex-color":8,"pex-glu":44}],70:[function(require,module,exports){
+},{"merge":17,"pex-color":18,"pex-glu":54}],80:[function(require,module,exports){
 var glu = require('pex-glu');
 var color = require('pex-color');
 var Context = glu.Context;
@@ -11105,7 +11828,7 @@ function ShowColors(uniforms) {
 ShowColors.prototype = Object.create(Material.prototype);
 
 module.exports = ShowColors;
-},{"merge":7,"pex-color":8,"pex-glu":44}],71:[function(require,module,exports){
+},{"merge":17,"pex-color":18,"pex-glu":54}],81:[function(require,module,exports){
 var glu = require('pex-glu');
 var color = require('pex-color');
 var geom = require('pex-geom');
@@ -11133,7 +11856,7 @@ function ShowDepth(uniforms) {
 ShowDepth.prototype = Object.create(Material.prototype);
 
 module.exports = ShowDepth;
-},{"merge":7,"pex-color":8,"pex-geom":26,"pex-glu":44}],72:[function(require,module,exports){
+},{"merge":17,"pex-color":18,"pex-geom":36,"pex-glu":54}],82:[function(require,module,exports){
 var glu = require('pex-glu');
 var color = require('pex-color');
 var Context = glu.Context;
@@ -11156,7 +11879,7 @@ function ShowNormals(uniforms) {
 ShowNormals.prototype = Object.create(Material.prototype);
 
 module.exports = ShowNormals;
-},{"merge":7,"pex-color":8,"pex-glu":44}],73:[function(require,module,exports){
+},{"merge":17,"pex-color":18,"pex-glu":54}],83:[function(require,module,exports){
 var glu = require('pex-glu');
 var color = require('pex-color');
 var geom = require('pex-geom');
@@ -11182,7 +11905,7 @@ function ShowPosition(uniforms) {
 ShowPosition.prototype = Object.create(Material.prototype);
 
 module.exports = ShowPosition;
-},{"merge":7,"pex-color":8,"pex-geom":26,"pex-glu":44}],74:[function(require,module,exports){
+},{"merge":17,"pex-color":18,"pex-geom":36,"pex-glu":54}],84:[function(require,module,exports){
 var glu = require('pex-glu');
 var color = require('pex-color');
 var geom = require('pex-geom');
@@ -11208,7 +11931,7 @@ function ShowTexCoords(uniforms) {
 ShowTexCoords.prototype = Object.create(Material.prototype);
 
 module.exports = ShowTexCoords;
-},{"merge":7,"pex-color":8,"pex-geom":26,"pex-glu":44}],75:[function(require,module,exports){
+},{"merge":17,"pex-color":18,"pex-geom":36,"pex-glu":54}],85:[function(require,module,exports){
 var glu = require('pex-glu');
 var color = require('pex-color');
 var Context = glu.Context;
@@ -11232,7 +11955,7 @@ SkyBox.prototype = Object.create(Material.prototype);
 
 module.exports = SkyBox;
 
-},{"merge":7,"pex-color":8,"pex-glu":44}],76:[function(require,module,exports){
+},{"merge":17,"pex-color":18,"pex-glu":54}],86:[function(require,module,exports){
 var glu = require('pex-glu');
 var color = require('pex-color');
 var Context = glu.Context;
@@ -11256,7 +11979,7 @@ SkyBoxEnvMap.prototype = Object.create(Material.prototype);
 
 module.exports = SkyBoxEnvMap;
 
-},{"merge":7,"pex-color":8,"pex-glu":44}],77:[function(require,module,exports){
+},{"merge":17,"pex-color":18,"pex-glu":54}],87:[function(require,module,exports){
 var glu = require('pex-glu');
 var color = require('pex-color');
 var Context = glu.Context;
@@ -11283,7 +12006,7 @@ function SolidColor(uniforms) {
 SolidColor.prototype = Object.create(Material.prototype);
 
 module.exports = SolidColor;
-},{"merge":7,"pex-color":8,"pex-glu":44}],78:[function(require,module,exports){
+},{"merge":17,"pex-color":18,"pex-glu":54}],88:[function(require,module,exports){
 var glu = require('pex-glu');
 var color = require('pex-color');
 var geom = require('pex-geom');
@@ -11313,7 +12036,7 @@ Textured.prototype = Object.create(Material.prototype);
 
 module.exports = Textured;
 
-},{"merge":7,"pex-color":8,"pex-geom":26,"pex-glu":44}],79:[function(require,module,exports){
+},{"merge":17,"pex-color":18,"pex-geom":36,"pex-glu":54}],89:[function(require,module,exports){
 var glu = require('pex-glu');
 var color = require('pex-color');
 var sys = require('pex-sys');
@@ -11352,7 +12075,7 @@ TexturedCubeMap.prototype = Object.create(Material.prototype);
 
 module.exports = TexturedCubeMap;
 
-},{"merge":7,"pex-color":8,"pex-glu":44,"pex-sys":82}],80:[function(require,module,exports){
+},{"merge":17,"pex-color":18,"pex-glu":54,"pex-sys":92}],90:[function(require,module,exports){
 var glu = require('pex-glu');
 var color = require('pex-color');
 var Context = glu.Context;
@@ -11376,7 +12099,7 @@ TexturedEnvMap.prototype = Object.create(Material.prototype);
 
 module.exports = TexturedEnvMap;
 
-},{"merge":7,"pex-color":8,"pex-glu":44}],81:[function(require,module,exports){
+},{"merge":17,"pex-color":18,"pex-glu":54}],91:[function(require,module,exports){
 var glu = require('pex-glu');
 var color = require('pex-color');
 var geom = require('pex-geom');
@@ -11404,13 +12127,13 @@ TexturedTriPlanar.prototype = Object.create(Material.prototype);
 
 module.exports = TexturedTriPlanar;
 
-},{"merge":7,"pex-color":8,"pex-geom":26,"pex-glu":44}],82:[function(require,module,exports){
+},{"merge":17,"pex-color":18,"pex-geom":36,"pex-glu":54}],92:[function(require,module,exports){
 module.exports.Platform = require('./lib/Platform');
 module.exports.Window = require('./lib/Window');
 module.exports.Time = require('./lib/Time');
 module.exports.IO = require('./lib/IO');
 module.exports.Log = require('./lib/Log');
-},{"./lib/IO":84,"./lib/Log":85,"./lib/Platform":86,"./lib/Time":87,"./lib/Window":88}],83:[function(require,module,exports){
+},{"./lib/IO":94,"./lib/Log":95,"./lib/Platform":96,"./lib/Time":97,"./lib/Window":98}],93:[function(require,module,exports){
 var Platform = require('./Platform');
 var Log = require('./Log');
 var merge = require('merge');
@@ -11758,7 +12481,7 @@ var BrowserWindow = { simpleWindow: simpleWindow };
 
 module.exports = BrowserWindow;
 
-},{"./Log":85,"./Platform":86,"merge":7}],84:[function(require,module,exports){
+},{"./Log":95,"./Platform":96,"merge":17}],94:[function(require,module,exports){
 (function (process){
 var Platform = require('./Platform');
 var Log = require('./Log');
@@ -11896,7 +12619,7 @@ var WebIO = function () {
 if (Platform.isPlask) module.exports = PlaskIO();
 else if (Platform.isBrowser) module.exports = WebIO();
 }).call(this,require('_process'))
-},{"./Log":85,"./Platform":86,"_process":6,"merge":7,"path":5,"plask":4}],85:[function(require,module,exports){
+},{"./Log":95,"./Platform":96,"_process":16,"merge":17,"path":15,"plask":14}],95:[function(require,module,exports){
 function Log() {
 }
 
@@ -11915,7 +12638,7 @@ Log.error = function(msg) {
 };
 
 module.exports = Log;
-},{}],86:[function(require,module,exports){
+},{}],96:[function(require,module,exports){
 (function (process){
 module.exports.isPlask = typeof window === 'undefined' && typeof process === 'object';
 module.exports.isBrowser = typeof window === 'object' && typeof document === 'object';
@@ -11923,7 +12646,7 @@ module.exports.isEjecta = typeof ejecta === 'object' && typeof ejecta.include ==
 module.exports.isiOS = module.exports.isBrowser && typeof navigator === 'object' && /(iPad|iPhone|iPod)/g.test( navigator.userAgent );
 module.exports.isMobile = module.exports.isiOS;
 }).call(this,require('_process'))
-},{"_process":6}],87:[function(require,module,exports){
+},{"_process":16}],97:[function(require,module,exports){
 var Log = require('./Log');
 
 var Time = {
@@ -12007,7 +12730,7 @@ Time.reset = function() {
 }
 
 module.exports = Time;
-},{"./Log":85}],88:[function(require,module,exports){
+},{"./Log":95}],98:[function(require,module,exports){
 var Platform = require('./Platform');
 var BrowserWindow = require('./BrowserWindow');
 var Time = require('./Time');
@@ -12086,4 +12809,63 @@ var Window = {
 
 module.exports = Window;
 
-},{"./BrowserWindow":83,"./Log":85,"./Platform":86,"./Time":87,"merge":7,"plask":4}]},{},[1]);
+},{"./BrowserWindow":93,"./Log":95,"./Platform":96,"./Time":97,"merge":17,"plask":14}],99:[function(require,module,exports){
+arguments[4][57][0].apply(exports,arguments)
+},{"dup":57,"pex-sys":92}],100:[function(require,module,exports){
+var Context = require('./Context');
+
+function Material(program, uniforms) {
+  this.gl = Context.currentContext;
+  this.program = program;
+  this.uniforms = uniforms || {};
+  this.prevUniforms = {};
+  this.missingUniforms = {};
+}
+
+Material.prototype.use = function () {
+  this.program.use();
+  var numTextures = 0;
+  for (var name in this.program.uniforms) {
+    if (this.uniforms[name] == null) {
+      if (name.indexOf('[') == -1) { //don't warn for arrays
+        if (!this.missingUniforms[name]) {
+          this.missingUniforms[name] = 0;
+        }
+        this.missingUniforms[name]++;
+        //print log message only once, on second frame
+        if (this.missingUniforms[name] == 2) {
+          console.log('WARN', 'Uniform', name, 'is null');
+        }
+      }
+    }
+    else if (this.program.uniforms[name].type == this.gl.SAMPLER_2D || this.program.uniforms[name].type == this.gl.SAMPLER_CUBE) {
+      this.gl.activeTexture(this.gl.TEXTURE0 + numTextures);
+      if (this.uniforms[name].width > 0 && this.uniforms[name].height > 0) {
+        this.gl.bindTexture(this.uniforms[name].target, this.uniforms[name].handle);
+        this.program.uniforms[name](numTextures);
+      }
+      numTextures++;
+    }
+    else {
+//      var newValue = this.uniforms[name];
+//      var oldValue = this.prevUniforms[name];
+//      var newHash = null;
+//      if (oldValue !== null) {
+//        if (newValue && newValue.hash) {
+//          newHash = newValue.hash();
+//          if (newHash == oldValue) {
+//            continue;
+//          }
+//        } else if (newValue == oldValue) {
+//          continue;
+//        }
+//      }
+      this.program.uniforms[name](this.uniforms[name]);
+//      this.prevUniforms[name] = newHash ? newHash : newValue;
+    }
+  }
+};
+
+module.exports = Material;
+
+},{"./Context":99}]},{},[1]);
