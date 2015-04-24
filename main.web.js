@@ -29,25 +29,31 @@ var ScreenImage = glu.ScreenImage;
 sys.Window.create({
   settings: {
     width: 1280,
-    height: 720 ,
+    height: 800 ,
     type: '3d',
-    fullscreen: Platform.isBrowser ? true : false
+    fullscreen: Platform.isBrowser ? true : false,
+    //highdpi: 2
   },
-  debug:                  true,
-  displacementHeight:     0.105,
-  textures:               [],
-  currentTexture:         0,
-  showNormals:            false,
+
+  debug:                false,
+  drawMetal:            true,
+  drawFluid:            false,
+  displacementHeight:   0.4,
+  textures:             [],
+  currentTexture:       0,
+  showNormals:          false,
 
   init: function() {
     var planeSize = 2;
     var numSteps = 200;
     var plane = new Plane(planeSize, planeSize, numSteps, numSteps, 'x', 'y');
+    var planeWF = new Plane(planeSize, planeSize, numSteps/4, numSteps/4, 'x', 'y');
     var simWidth = this.width/4;
     var simHeight = this.height/4;
+    this.zTreshold = 0.01;
     this.fluid = new Fluid(simWidth, simHeight, this.width, this.height);
     this.screenImage = new ScreenImage(null, 0, 0, this.width, this.height,
-                                                    this.width, this.height);
+                                                   this.width, this.height);
 
     this.drawVelocityForce = new DrawForce({
       width:  this.width
@@ -79,11 +85,6 @@ sys.Window.create({
       this.lastMouse.y = mouse.y;
     }.bind(this));
 
-    this.on('leftMouseDown', function(e) {
-//      this.drawDensityForce.clear();
-//      this.drawVelocityForce.clear();
-    }.bind(this));
-
     this.on('mouseDragged', function(e) {
       var mouse = new Vec2();
 
@@ -103,29 +104,27 @@ sys.Window.create({
     }.bind(this));
     this.textures = [
       Texture2D.load('assets/chroma.jpg')
-    , Texture2D.load('assets/plastic_red.jpg')
-    , Texture2D.load('assets/Blue Mirror.png')
-    , Texture2D.load('assets/ok_ochre_oil.jpg')
-    , Texture2D.load('assets/SebcesoirGold1.jpg')
-    , Texture2D.load('assets/Steel-Brushed.png')
-    , Texture2D.load('assets/IronCast.png')
+    , Texture2D.load('assets/chroma2.jpg')
+    , Texture2D.load('assets/chroma3.jpg')
     ];
 
     this.mesh = new Mesh(plane, new DisplacedMatCap({
-      texture:            this.textures[2],
+      texture:            this.textures[0],
       tint:               Color.Black,
+      zTreshold:          this.zTreshold,
       displacementHeight: this.displacementHeight,
-      textureSize:        new Vec2(512, 512),
+      textureSize:        new Vec2(2100, 2100),
       planeSize:          new Vec2(planeSize, planeSize),
       numSteps:           numSteps,
     }));
 
 
-    this.meshWireframe = new Mesh(plane, new DisplacedMatCap({
-      texture:            this.textures[2],
+    this.meshWireframe = new Mesh(planeWF, new DisplacedMatCap({
+      texture:            this.textures[0],
       tint:               Color.Yellow,
+      zTreshold:          this.zTreshold,
       displacementHeight: this.displacementHeight,
-      textureSize:        new Vec2(512, 512),
+      textureSize:        new Vec2(2100, 2100),
       planeSize:          new Vec2(planeSize, planeSize),
       numSteps:           numSteps
     }), { lines: true });
@@ -133,27 +132,64 @@ sys.Window.create({
     this.meshWireframe.position.z = 0.001;
 
     this.gui = new GUI(this);
-    this.gui.addParam('Debug \'d\'', this, 'debug');
-    this.gui.addParam('Show normals \'n\'', this, 'showNormals');
-    this.gui.addParam('displacementHeight', this, 'displacementHeight');
-    this.gui.addParam('iterations', this.fluid, 'iterations', {min: 0, max:50});
-    //this.gui.addTextureList('Material', this, 'currentTexture',
-    //    this.textures.map(function(tex, i) {
-    //      return {
-    //        texture: tex,
-    //        name: 'Tex' + i,
-    //        value: i
-    //      }
-    //    }));
 
-    this.camera = new PerspectiveCamera(90, this.width / this.height);
-    this.camera.setPosition(new Vec3(0, 1.5, 1.0));
-//    this.arcball = new Arcball(this, this.camera);
-//    this.arcball.setPosition(new Vec3(0, 1.5, 1.5));
+    this.gui.addLabel('Drawing options');
+    this.gui.addParam('Debug \'d\'', this, 'debug');
+    this.gui.addParam('Draw Fluid \'f\'', this, 'drawFluid');
+    this.gui.addParam('Draw Metal \'m\'', this, 'drawMetal');
+    this.gui.addParam('Show normals \'n\'', this, 'showNormals');
+    this.gui.addParam('Displacement Height', this, 'displacementHeight');
+    this.gui.addParam('z Treshold', this, 'zTreshold', {min: 0.0001, max: 0.5});
+
+    this.gui.addLabel('Fluid options');
+    this.gui.addParam('Iterations',  this.fluid, 'iterations', {min: 1, max:100});
+    this.gui.addParam('Speed',       this.fluid, 'speed',      {min: 0, max:100});
+    this.gui.addParam('Cell Size',   this.fluid, 'cellSize',   {min: 0, max:2});
+    this.gui.addParam('Viscosity',   this.fluid, 'viscosity',  {min: 0, max:1});
+    this.gui.addParam('Dissipation', this.fluid, 'dissipation',{min: 0, max:0.02});
+    this.gui.addParam('Clamp Force', this.fluid, 'clampForce', {min: 0, max:0.1});
+    this.gui.addParam('Max Density', this.fluid, 'maxDensity', {min: 0, max:5});
+    this.gui.addParam('Max Velocity',this.fluid, 'maxVelocity',{min: 0, max:10});
+
+    this.gui.addLabel('Mouse options');
+    this.gui.addParam('Density Strength',
+                      this.drawDensityForce, 'strength',{min: 0, max:5});
+    this.gui.addParam('Density Radius',
+                      this.drawDensityForce, 'radius',{min: 0, max:0.1});
+    this.gui.addParam('Density Radius',
+                      this.drawDensityForce, 'edge',{min: 0, max:1});
+    this.gui.addParam('Density Strength',
+                      this.drawVelocityForce, 'strength',{min: 0, max:5});
+    this.gui.addParam('Density Radius',
+                      this.drawVelocityForce, 'radius',{min: 0, max:0.1});
+    this.gui.addParam('Density Radius',
+                      this.drawVelocityForce, 'edge',{min: 0, max:1});
+
+    this.gui.addTextureList('Material', this, 'currentTexture',
+        this.textures.map(function(tex, i) {
+          return {
+            texture: tex,
+            name: 'Tex' + i,
+            value: i
+          }
+        }));
+
+    this.camera = new PerspectiveCamera(80, this.width / this.height);
+    this.camera.setPosition(new Vec3(0, 0.0, 1.0));
+   // this.arcball = new Arcball(this, this.camera);
+   // this.arcball.setPosition(new Vec3(0, 1.5, 1.5));
 
     this.on('keyDown', function(e) {
       if (e.str == 'd') {
         this.debug = !this.debug;
+        this.gui.items[0].dirty = true;
+      }
+      if (e.str == 'm') {
+        this.drawMetal = !this.drawMetal;
+        this.gui.items[0].dirty = true;
+      }
+      if (e.str == 'f') {
+        this.drawFluid = !this.drawFluid;
         this.gui.items[0].dirty = true;
       }
       if (e.str == 'n') {
@@ -163,8 +199,8 @@ sys.Window.create({
     }.bind(this));
 
 
-    this.gui.addTexture2D('Velocity', this.drawVelocityForce.forceBuffer.getColorAttachment(0))
-    this.gui.addTexture2D('Density', this.drawDensityForce.forceBuffer.getColorAttachment(0))
+//    this.gui.addTexture2D('Velocity', this.drawVelocityForce.forceBuffer.getColorAttachment(0))
+//    this.gui.addTexture2D('Density', this.drawDensityForce.forceBuffer.getColorAttachment(0))
   },
   draw: function() {
     try {
@@ -196,10 +232,10 @@ sys.Window.create({
       }
 
       var fluidTexture = this.fluid.iterate();
-      glu.clearColorAndDepth(Color.Black);
+      glu.clearColorAndDepth(Color.fromRGB(0/255, 0/255, 0/255, 1));
       glu.viewport(0, 0, this.width, this.height);
       this.screenImage.setImage(fluidTexture);
-      this.screenImage.draw();
+      if (this.drawFluid) this.screenImage.draw();
 
       glu.clearDepth();
       glu.enableDepthReadAndWrite(true);
@@ -213,6 +249,8 @@ sys.Window.create({
       this.mesh.material.uniforms.
         time                = sys.Time.seconds;
       this.mesh.material.uniforms.
+        zTreshold           = this.zTreshold;
+      this.mesh.material.uniforms.
         displacementMap     = fluidTexture;
 
       this.meshWireframe.material.uniforms.
@@ -224,17 +262,19 @@ sys.Window.create({
       this.meshWireframe.material.uniforms.
         time                = sys.Time.seconds;
       this.meshWireframe.material.uniforms.
+        zTreshold           = this.zTreshold;
+      this.meshWireframe.material.uniforms.
         displacementMap     = fluidTexture;
 
 
       glu.enableDepthReadAndWrite(false, false);
       glu.enableAdditiveBlending(true);
-      //this.mesh.draw(this.camera);
+      if (this.drawMetal) this.mesh.draw(this.camera);
 
       glu.clearDepth();
       this.gui.draw();
 
-      //if (this.debug) this.meshWireframe.draw(this.camera);
+      if (this.debug) this.meshWireframe.draw(this.camera);
 
     } catch (e) {
       console.log(e.stack);
@@ -485,10 +525,10 @@ function Fluid(simWidth, simHeight, drawWidth, drawHeight) {
   this.iterations = 40;       // 1 to 100
   this.speed = 28;            // 0 to 100
   this.cellSize = 1.25;       // 0.0 to 2.0
-  this.viscosity = 0.5;     // 0 to 1
-  this.dissipation = 0.001;   // 0 to 0.02
+  this.viscosity = 0.5;       // 0 to 1
+  this.dissipation = 0.005;   // 0 to 0.02
   this.clampForce = 0.07;     // 0 to 0.1
-  this.maxDensity = 0.9;        // 0 to 5
+  this.maxDensity = 0.9;      // 0 to 5
   this.maxVelocity = 4;       // 0 to 10
   //-----------------------------
 
@@ -1077,7 +1117,7 @@ var Color = color.Color;
 var merge = require('merge');
 
 
-var DisplacedMatCapGLSL = "#ifdef VERT\n\nuniform mat4 projectionMatrix;\nuniform mat4 modelViewMatrix;\nuniform mat4 normalMatrix;\nuniform float time;\nuniform float pointSize;\nattribute vec3 position;\nattribute vec3 normal;\nattribute vec2 texCoord;\n\nvarying vec3 e;\nvarying vec3 n;\nvarying vec3 p;\n\nuniform sampler2D displacementMap;\nuniform float displacementHeight;\nuniform vec2 textureSize;\nuniform vec2 planeSize;\nuniform float numSteps;\n\n\nvoid main() {\n    vec3 pos = position;\n    float height = displacementHeight * texture2D(displacementMap, texCoord).r;\n\n    float heightRight =\n                  displacementHeight *\n                  texture2D(displacementMap, texCoord + vec2(2.0/textureSize.x, 0.0)).r;\n\n    float heightFront =\n                  displacementHeight *\n                  texture2D(displacementMap, texCoord + vec2(0.0, 2.0/textureSize.y)).r;\n\n    height = displacementHeight * texture2D(displacementMap, texCoord).r;\n    heightRight =\n              displacementHeight *\n              texture2D(displacementMap, texCoord + vec2(2.0/textureSize.x, 0.0)).r;\n\n    heightFront =\n              displacementHeight *\n              texture2D(displacementMap, texCoord + vec2(0.0, 2.0/textureSize.y)).r;\n\n    vec3 right =\n              normalize(vec3(2.0*planeSize.x/numSteps, heightRight, 0.0) -\n              vec3(0.0, height, 0.0));\n\n    vec3 front =\n              normalize(vec3(0.0, heightFront, 2.0*planeSize.y/numSteps) -\n              vec3(0.0, height, 0.0));\n\n    vec3 up = normalize(cross(right, -front));\n\n    vec3 N = up;\n\n    pos.z += height * 5.0;\n    gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);\n\n    e = normalize(vec3(modelViewMatrix * vec4(position, 1.0)));\n    n = normalize(vec3(normalMatrix * vec4(N, 1.0)));\n    p = pos;\n}\n\n#endif\n\n#ifdef FRAG\n\nuniform vec4 tint;\nuniform sampler2D texture;\nuniform bool showNormals;\n\nvarying vec3 e;\nvarying vec3 n;\nvarying vec3 p;\n\n\nvoid main() {\n    vec3 r = (reflect(e, n));\n    float m = 2.0 * sqrt(r.x * r.x + r.y * r.y + (r.z + 1.0) * (r.z + 1.0));\n    vec2 N = r.xy / m + 0.5;\n    vec3 base = texture2D( texture, N ).rgb;\n\n    if (length(tint.xyz) > 0.0) {\n        gl_FragColor = tint;\n    }\n    else {\n        gl_FragColor = vec4( base, 1.0 );\n    }\n\n    if (showNormals) {\n        gl_FragColor = vec4(n * 0.5 + 0.5, 1.0);\n    }\n\n    if (p.z < 0.0001) discard;\n}\n\n#endif\n";
+var DisplacedMatCapGLSL = "#ifdef VERT\n\nuniform mat4 projectionMatrix;\nuniform mat4 modelViewMatrix;\nuniform mat4 normalMatrix;\nuniform float time;\nuniform float pointSize;\nattribute vec3 position;\nattribute vec3 normal;\nattribute vec2 texCoord;\n\nvarying vec3 e;\nvarying vec3 n;\nvarying vec3 p;\n\nuniform sampler2D displacementMap;\nuniform float displacementHeight;\nuniform vec2 textureSize;\nuniform vec2 planeSize;\nuniform float numSteps;\n\n\nvoid main() {\n    vec3 pos = position;\n    float height = displacementHeight * texture2D(displacementMap, texCoord).r;\n\n    float heightRight =\n                  displacementHeight *\n                  texture2D(displacementMap, texCoord + vec2(2.0/textureSize.x, 0.0)).r;\n\n    float heightFront =\n                  displacementHeight *\n                  texture2D(displacementMap, texCoord + vec2(0.0, 2.0/textureSize.y)).r;\n\n    height = displacementHeight * texture2D(displacementMap, texCoord).r;\n    heightRight =\n              displacementHeight *\n              texture2D(displacementMap, texCoord + vec2(2.0/textureSize.x, 0.0)).r;\n\n    heightFront =\n              displacementHeight *\n              texture2D(displacementMap, texCoord + vec2(0.0, 2.0/textureSize.y)).r;\n\n    vec3 right =\n              normalize(vec3(2.0*planeSize.x/numSteps, heightRight, 0.0) -\n              vec3(0.0, height, 0.0));\n\n    vec3 front =\n              normalize(vec3(0.0, heightFront, 2.0*planeSize.y/numSteps) -\n              vec3(0.0, height, 0.0));\n\n    vec3 up = normalize(cross(right, -front));\n\n    vec3 N = up;\n\n    pos.z += height ;\n    pos.z = clamp(pos.z, 0.0, 0.2);\n    gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);\n\n    e = normalize(vec3(modelViewMatrix * vec4(position, 1.0)));\n    n = normalize(vec3(normalMatrix * vec4(N, 1.0)));\n    p = pos;\n}\n\n#endif\n\n#ifdef FRAG\n\nuniform vec4 tint;\nuniform float zTreshold;\nuniform sampler2D texture;\nuniform bool showNormals;\n\nvarying vec3 e;\nvarying vec3 n;\nvarying vec3 p;\n\n\nvoid main() {\n    vec3 r = (reflect(e, n));\n    float m = 2.0 * sqrt(r.x * r.x + r.y * r.y + (r.z + 1.0) * (r.z + 1.0));\n    vec2 N = r.xy / m + 0.5;\n    vec3 base = texture2D( texture, N ).rgb;\n\n    if (length(tint.xyz) > 0.0) {\n        gl_FragColor = tint;\n    }\n    else {\n        gl_FragColor = vec4( base, 1.0 );\n    }\n\n    if (showNormals) {\n        gl_FragColor = vec4(n * 0.5 + 0.5, 1.0);\n    }\n\n    if (p.z < zTreshold) discard;\n}\n\n#endif\n";
 
 function DisplacedMatCap(uniforms) {
   this.gl = Context.currentContext;

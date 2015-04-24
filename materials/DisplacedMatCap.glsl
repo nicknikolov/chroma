@@ -53,7 +53,8 @@ void main() {
 
     vec3 N = up;
 
-    pos.z += height * 5.0;
+    pos.z += height ;
+    pos.z = clamp(pos.z, 0.0, 0.2);
     gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
 
     e = normalize(vec3(modelViewMatrix * vec4(position, 1.0)));
@@ -66,6 +67,7 @@ void main() {
 #ifdef FRAG
 
 uniform vec4 tint;
+uniform float zTreshold;
 uniform sampler2D texture;
 uniform bool showNormals;
 
@@ -91,7 +93,7 @@ void main() {
         gl_FragColor = vec4(n * 0.5 + 0.5, 1.0);
     }
 
-    if (p.z < 0.0001) discard;
+    if (p.z < zTreshold) discard;
 }
 
 #endif
