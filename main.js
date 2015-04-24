@@ -41,7 +41,7 @@ sys.Window.create({
   init: function() {
     var planeSize = 2;
     var numSteps = 200;
-    var plane = new Plane(planeSize, planeSize, numSteps, numSteps, 'x', 'z');
+    var plane = new Plane(planeSize, planeSize, numSteps, numSteps, 'x', 'y');
     var simWidth = 512;
     var simHeight = 512;
     this.fluid = new Fluid(simWidth, simHeight, this.width, this.height);
@@ -55,8 +55,8 @@ sys.Window.create({
     , type: 'velocity'
     });
 
-    this.drawVelocityForce.strength = 2.9;
-    this.drawVelocityForce.radius = 0.05;
+    this.drawVelocityForce.strength = 4.2;
+    this.drawVelocityForce.radius = 0.08;
 
     this.drawDensityForce = new DrawForce({
       width:  this.width
@@ -64,8 +64,8 @@ sys.Window.create({
     , type: 'density'
     });
 
-    this.drawDensityForce.strength = 0.5;
-    this.drawDensityForce.radius = 0.05;
+    this.drawDensityForce.strength = 2.7;
+    this.drawDensityForce.radius = 0.13;
 
 
     this.on('mouseMoved', function (e) {
@@ -109,16 +109,19 @@ sys.Window.create({
     ];
 
     this.mesh = new Mesh(plane, new DisplacedMatCap({
-      texture:            this.textures[0],
+      texture:            this.textures[2],
       tint:               Color.Black,
       displacementHeight: this.displacementHeight,
-      textureSize:        new Vec2(2100, 2100),
+      textureSize:        new Vec2(512, 512),
       planeSize:          new Vec2(planeSize, planeSize),
-      numSteps:           numSteps
+      numSteps:           numSteps,
     }));
 
+//    var ShowTexCoords = materials.ShowTexCoords;
+//    this.mesh = new Mesh(plane, new ShowTexCoords() );
+
     this.meshWireframe = new Mesh(plane, new DisplacedMatCap({
-      texture:            this.textures[0],
+      texture:            this.textures[2],
       tint:               Color.Yellow,
       displacementHeight: this.displacementHeight,
       textureSize:        new Vec2(512, 512),
@@ -133,7 +136,6 @@ sys.Window.create({
     this.gui.addParam('Show normals \'n\'', this, 'showNormals');
     this.gui.addParam('displacementHeight', this, 'displacementHeight');
     this.gui.addParam('iterations', this.fluid, 'iterations', {min: 0, max:50});
-    this.gui.addParam('bu', this.fluid, 'bu', {min: 0, max:100});
     //this.gui.addTextureList('Material', this, 'currentTexture',
     //    this.textures.map(function(tex, i) {
     //      return {
@@ -143,7 +145,8 @@ sys.Window.create({
     //      }
     //    }));
 
-//    this.camera = new PerspectiveCamera(60, this.width / this.height);
+    this.camera = new PerspectiveCamera(30, this.width / this.height);
+    this.camera.setPosition(new Vec3(0, 1.5, 1.0));
 //    this.arcball = new Arcball(this, this.camera);
 //    this.arcball.setPosition(new Vec3(0, 1.5, 1.5));
 
@@ -159,15 +162,15 @@ sys.Window.create({
     }.bind(this));
 
 
-    this.gui.addTexture2D('Velocity', this.drawVelocityForce.forceBuffer.getColorAttachment(0))
-    this.gui.addTexture2D('Density', this.drawDensityForce.forceBuffer.getColorAttachment(0))
+//    this.gui.addTexture2D('Velocity', this.drawVelocityForce.forceBuffer.getColorAttachment(0))
+//    this.gui.addTexture2D('Density', this.drawDensityForce.forceBuffer.getColorAttachment(0))
   },
   draw: function() {
     try {
       //disable depth test
-      //glu.enableDepthReadAndWrite(false, false);
-      //glu.viewport(0, 0, this.fluid.width, this.fluid.height);
-      //glu.viewport(0, 0, this.width, this.height);
+      glu.enableDepthReadAndWrite(false, false);
+      glu.viewport(0, 0, this.fluid.width, this.fluid.height);
+      glu.viewport(0, 0, this.width, this.height);
 
       this.drawDensityForce.update();
       if (this.drawDensityForce.forceChanged) {
@@ -193,44 +196,41 @@ sys.Window.create({
 
       var fluidTexture = this.fluid.iterate();
       glu.clearColorAndDepth(Color.Black);
-      //this.fluid.draw();
       this.screenImage.setImage(fluidTexture);
       this.screenImage.draw();
 
-      //this.fluid.screenImage.draw(this.fluid.densityPingPong.destBuffer.getColorAttachment(0), this.show);
+      glu.clearDepth();
+      glu.enableDepthReadAndWrite(true);
 
-     // glu.clearDepth();
-     // glu.enableDepthReadAndWrite(true);
+      this.mesh.material.uniforms.
+        showNormals         = this.showNormals;
+      this.mesh.material.uniforms.
+        displacementHeight  = this.displacementHeight;
+      this.mesh.material.uniforms.
+        texture             = this.textures[this.currentTexture];
+      this.mesh.material.uniforms.
+        time                = sys.Time.seconds;
+      this.mesh.material.uniforms.
+        displacementMap     = fluidTexture;
 
-     // this.mesh.material.uniforms.
-     //   showNormals         = this.showNormals;
-     // this.mesh.material.uniforms.
-     //   displacementHeight  = this.displacementHeight;
-     // this.mesh.material.uniforms.
-     //   texture             = this.textures[this.currentTexture];
-     // this.mesh.material.uniforms.
-     //   time                = sys.Time.seconds;
-     // this.mesh.material.uniforms.
-     //   displacementMap     = fluidTexture;
-
-     // this.meshWireframe.material.uniforms.
-     //   showNormals         = this.showNormals;
-     // this.meshWireframe.material.uniforms.
-     //   displacementHeight  = this.displacementHeight;
-     // this.meshWireframe.material.
-     //   texture             = this.textures[this.currentTexture];
-     // this.meshWireframe.material.uniforms.
-     //   time                = sys.Time.seconds;
-     // this.meshWireframe.material.uniforms.
-     //   displacementMap     = fluidTexture;
+      this.meshWireframe.material.uniforms.
+        showNormals         = this.showNormals;
+      this.meshWireframe.material.uniforms.
+        displacementHeight  = this.displacementHeight;
+      this.meshWireframe.material.
+        texture             = this.textures[this.currentTexture];
+      this.meshWireframe.material.uniforms.
+        time                = sys.Time.seconds;
+      this.meshWireframe.material.uniforms.
+        displacementMap     = fluidTexture;
 
 
-    //glu.enableDepthReadAndWrite(false, false);
-    //glu.enableAdditiveBlending(true);
-//      this.mesh.draw(this.camera);
+      glu.enableDepthReadAndWrite(false, false);
+      glu.enableAdditiveBlending(true);
+      this.mesh.draw(this.camera);
 
-  glu.clearDepth();
-  this.gui.draw();
+      glu.clearDepth();
+      this.gui.draw();
 
       //if (this.debug) this.meshWireframe.draw(this.camera);
 
