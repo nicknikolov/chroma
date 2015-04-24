@@ -52,15 +52,17 @@ sys.Window.create({
       width:  this.width
     , height: this.height
     , type: 'velocity'
+    , isTemporary: true
     });
 
-    this.drawVelocityForce.strength = 4.2;
-    this.drawVelocityForce.radius = 0.08;
+    this.drawVelocityForce.strength = 0.9;
+    this.drawVelocityForce.radius = 0.01;
 
     this.drawDensityForce = new DrawForce({
       width:  this.width
     , height: this.height
     , type: 'density'
+    , isTemporary: true
     });
 
     this.drawDensityForce.strength = 2.7;
@@ -77,8 +79,8 @@ sys.Window.create({
     }.bind(this));
 
     this.on('leftMouseDown', function(e) {
-      this.drawDensityForce.clear();
-      this.drawVelocityForce.clear();
+//      this.drawDensityForce.clear();
+//      this.drawVelocityForce.clear();
     }.bind(this));
 
     this.on('mouseDragged', function(e) {
@@ -171,7 +173,9 @@ sys.Window.create({
       this.drawDensityForce.update();
       if (this.drawDensityForce.forceChanged) {
         this.drawDensityForce.forceChanged = false;
-        var densityStrength = this.drawDensityForce.strength * sys.Time.delta;
+        var densityStrength = this.drawDensityForce.strength;
+        if (!this.drawDensityForce.isTemporary)
+          densityStrength *= sys.Time.delta;
         this.fluid.addDensity({
           texture: this.drawDensityForce.forceBuffer.getColorAttachment(0)
         , strength: densityStrength
@@ -181,7 +185,9 @@ sys.Window.create({
       this.drawVelocityForce.update();
       if (this.drawVelocityForce.forceChanged) {
         this.drawVelocityForce.forceChanged = false;
-        var velocityStrength = this.drawVelocityForce.strength * sys.Time.delta;
+        var velocityStrength = this.drawVelocityForce.strength;
+        if (!this.drawVelocityForce.isTemporary)
+          velocityStrength *= sys.Time.delta;
         this.fluid.addVelocity({
           texture: this.drawVelocityForce.forceBuffer.getColorAttachment(0)
         , strength: velocityStrength

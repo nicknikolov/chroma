@@ -15,7 +15,8 @@ module.exports = DrawForce;
 function DrawForce (options) {
   this.width = options.width;
   this.height = options.height;
-  this.type = options.type || 'density';
+  this.type = options.type;
+  this.isTemporary = options.isTemporary;
   this.radius = 0.05;
   this.strength = 2.5;
   this.force = new Vec3(0.3, 0.7, 0.9);
@@ -24,6 +25,7 @@ function DrawForce (options) {
   this.forceBuffer = new FBO(this.width, this.height, { bpp: 32 });
   this.density = new Color(1, 1, 1, 1);
   this.velocity = new Vec2(0,0);
+
 
   this.forceChanged = false;
   this.forceApplied = false;
@@ -39,6 +41,9 @@ DrawForce.prototype.applyForce = function (normalizedPos) {
   absPos.x *= this.width;
   absPos.y *= this.height;
   var absRadius = this.radius * this.width;
+
+  if (this.isTemporary && !this.forceApplied) // && allow for multiple temporal forces
+			this.clear();
 
   var typeForce = this.force.clone();
   if (this.type === 'velocity') {
@@ -75,7 +80,8 @@ DrawForce.prototype.clear = function () {
 }
 
 DrawForce.prototype.update = function () {
-  if (this.forceApplied) this.forceChanged = true;
+  if      (this.forceApplied) this.forceChanged = true;
+  else if (this.isTemporary)  this.forceChanged = false;
   this.forceApplied = false;
 }
 
