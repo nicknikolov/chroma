@@ -47,7 +47,6 @@ sys.Window.create({
     this.fluid = new Fluid(simWidth, simHeight, this.width, this.height);
     this.screenImage = new ScreenImage(null, 0, 0, this.width, this.height,
                                                     this.width, this.height);
-    this.lastMouse = new Vec2(0, 0);
 
     this.drawVelocityForce = new DrawForce({
       width:  this.width
@@ -67,6 +66,7 @@ sys.Window.create({
     this.drawDensityForce.strength = 2.7;
     this.drawDensityForce.radius = 0.03;
 
+    this.lastMouse = new Vec2(0, 0);
 
     this.on('mouseMoved', function (e) {
       var mouse = new Vec2();
@@ -74,9 +74,9 @@ sys.Window.create({
       mouse.y = (this.height - e.y) / this.height;
       this.lastMouse.x = mouse.x;
       this.lastMouse.y = mouse.y;
-    });
+    }.bind(this));
 
-    this.on('mouseDown', function(e) {
+    this.on('leftMouseDown', function(e) {
       this.drawDensityForce.clear();
       this.drawVelocityForce.clear();
     }.bind(this));
@@ -97,7 +97,7 @@ sys.Window.create({
       this.lastMouse.x = mouse.x;
       this.lastMouse.y = mouse.y;
 
-    });
+    }.bind(this));
     this.textures = [
       Texture2D.load('assets/chroma.jpg')
     , Texture2D.load('assets/plastic_red.jpg')
