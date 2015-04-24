@@ -50,7 +50,7 @@ AdvectShader.prototype.update = function (options) {
   this._program.uniforms.Dissipation(dissipation);
   this._program.uniforms.InverseCellSize(1.0 / cellSize);
   var scale = new Vec2(velocityTex.width / destBuffer.width,
-      velocityTex.height / destBuffer.height);
+                      velocityTex.height / destBuffer.height);
   this._program.uniforms.Scale(scale);
   frameRenderer.draw(this._program);
   destBuffer.unbind();

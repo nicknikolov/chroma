@@ -43,7 +43,7 @@ DrawForce.prototype.applyForce = function (normalizedPos) {
   var typeForce = this.force.clone();
   if (this.type === 'velocity') {
     typeForce.x *= this.width;
-    typeForce.y *= this.height;
+    typeForce.y *= this.width;
   }
 
   var value = new Vec4(typeForce.x, typeForce.y, typeForce.z, 1.0);

@@ -11,6 +11,7 @@ attribute vec2 texCoord;
 
 varying vec3 e;
 varying vec3 n;
+varying vec3 p;
 
 uniform sampler2D displacementMap;
 uniform float displacementHeight;
@@ -134,11 +135,12 @@ void main() {
 
     vec3 N = up;
 
-    pos.y += height;
+    pos.z += height * 5;
     gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
 
     e = normalize(vec3(modelViewMatrix * vec4(position, 1.0)));
     n = normalize(vec3(normalMatrix * vec4(N, 1.0)));
+    p = pos;
 }
 
 #endif
@@ -151,6 +153,7 @@ uniform bool showNormals;
 
 varying vec3 e;
 varying vec3 n;
+varying vec3 p;
 
 
 void main() {
@@ -171,6 +174,8 @@ void main() {
     if (showNormals) {
         gl_FragColor = vec4(n * 0.5 + 0.5, 1.0);
     }
+
+    if (p.z < 0.0001) discard;
 }
 
 #endif

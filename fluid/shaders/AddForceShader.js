@@ -6,8 +6,8 @@ var glu = require('pex-glu')
   , shader = fs.readFileSync(__dirname + '/addForce.glsl', 'utf8');
 
 function AddForceShader (width, height) {
-  this.width = width || 512;
-  this.height = height || 512;
+  this.width = width;
+  this.height = height;
   this._program = new Program(shader);
   this._program.use();
 }

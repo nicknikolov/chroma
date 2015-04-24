@@ -25,10 +25,12 @@ function Fluid(simWidth, simHeight, drawWidth, drawHeight) {
   // Fluid variables
   this.width = simWidth;
   this.height = simHeight;
-  this.iterations = 10;       // 1 to 100
-  this.speed = 15;            // 0 to 100
-  this.cellSize = 5.25;       // 0.0 to 2.0
-  this.viscosity = 0.005;     // 0 to 1
+  this.drawWidth = drawWidth;
+  this.drawHeight = drawHeight;
+  this.iterations = 40;       // 1 to 100
+  this.speed = 0.5;            // 0 to 100
+  this.cellSize = 1.25;       // 0.0 to 2.0
+  this.viscosity = 0.5;     // 0 to 1
   this.dissipation = 0.0008;   // 0 to 0.02
   this.clampForce = 0.01;     // 0 to 0.1
   this.maxDensity = 1;        // 0 to 5
@@ -85,6 +87,7 @@ function Fluid(simWidth, simHeight, drawWidth, drawHeight) {
 }
 
 Fluid.prototype.addDensity = function (options) {
+  glu.viewport(0, 0, this.drawWidth, this.drawHeight);
   var texture = options.texture;
   var strength = options.strength;
   glu.enableBlending(false);
@@ -99,6 +102,7 @@ Fluid.prototype.addDensity = function (options) {
 }
 
 Fluid.prototype.addVelocity = function (options) {
+  glu.viewport(0, 0, this.width, this.height);
   var texture = options.texture;
   var strength = options.strength;
   glu.enableBlending(false);
@@ -121,6 +125,7 @@ Fluid.prototype.iterate = function () {
 
   // Clamp Length
   if (this.maxDensity > 0) {
+    glu.viewport(0, 0, this.drawWidth, this.drawHeight);
     this.clampLengthShader.update({
       destBuffer: this.densityPingPong.destBuffer
     , backBufferTex: this.densityPingPong.sourceBuffer.getColorAttachment(0)
@@ -131,6 +136,7 @@ Fluid.prototype.iterate = function () {
     this.densityPingPong.swap();
   }
   if (this.maxVelocity > 0) {
+    glu.viewport(0, 0, this.width, this.height);
     this.clampLengthShader.update({
       destBuffer: this.velocityPingPong.destBuffer
     , backBufferTex: this.velocityPingPong.sourceBuffer.getColorAttachment(0)
@@ -141,7 +147,8 @@ Fluid.prototype.iterate = function () {
     this.velocityPingPong.swap();
   }
 
-// Advect
+   // Advect
+  glu.viewport(0, 0, this.width, this.height);
   this.advectShader.update({
     destBuffer: this.velocityPingPong.destBuffer
   , backBufferTex: this.velocityPingPong.sourceBuffer.getColorAttachment(0)
@@ -154,6 +161,7 @@ Fluid.prototype.iterate = function () {
   });
   this.velocityPingPong.swap();
 
+  glu.viewport(0, 0, this.drawWidth, this.drawHeight);
   this.advectShader.update({
     destBuffer: this.densityPingPong.destBuffer
   , backBufferTex: this.densityPingPong.sourceBuffer.getColorAttachment(0)
@@ -167,8 +175,9 @@ Fluid.prototype.iterate = function () {
   });
   this.densityPingPong.swap();
 
-// Diffuse
+  // Diffuse
   if (this.viscosity > 0) {
+  glu.viewport(0, 0, this.width, this.height);
     for (var i=0; i<this.iterations; i++) {
       this.diffuseShader.update({
         destBuffer: this.velocityPingPong.destBuffer
@@ -184,6 +193,7 @@ Fluid.prototype.iterate = function () {
   // Divergence and Jacobi
   this.divergenceBuffer.bindAndClear();
   this.divergenceBuffer.unbind();
+  glu.viewport(0, 0, this.width, this.height);
   this.divergenceShader.update({
     destBuffer: this.divergenceBuffer
   , velocityTex: this.velocityPingPong.sourceBuffer.getColorAttachment(0)
@@ -193,6 +203,7 @@ Fluid.prototype.iterate = function () {
   });
 
   this.pressurePingPong.clear();
+  glu.viewport(0, 0, this.width, this.height);
   for (var i=0; i<this.iterations; i++){
     this.jacobiShader.update({
       destBuffer: this.pressurePingPong.destBuffer
@@ -206,6 +217,7 @@ Fluid.prototype.iterate = function () {
   }
 
   if (this.addPressureBufferDidChange) {
+    glu.viewport(0, 0, this.width, this.height);
     this.addPressureBufferDidChange = false;
     this.addForceShader.update({
       destBuffer: this.pressurePingPong.destBuffer
@@ -217,6 +229,7 @@ Fluid.prototype.iterate = function () {
     this.pressurePingPong.swap();
   }
 
+  glu.viewport(0, 0, this.width, this.height);
   this.substractGradientShader.update({
     destBuffer: this.velocityPingPong.destBuffer
    , backBufferTex: this.velocityPingPong.sourceBuffer.getColorAttachment(0)

@@ -27,8 +27,8 @@ var ScreenImage = glu.ScreenImage;
 
 sys.Window.create({
   settings: {
-    width: 512 ,
-    height: 512 ,
+    width: 1280,
+    height: 720 ,
     type: '3d',
     fullscreen: Platform.isBrowser ? true : false
   },
@@ -42,16 +42,16 @@ sys.Window.create({
     var planeSize = 2;
     var numSteps = 200;
     var plane = new Plane(planeSize, planeSize, numSteps, numSteps, 'x', 'y');
-    var simWidth = 512;
-    var simHeight = 512;
+    var simWidth = this.width/4;
+    var simHeight = this.height/4;
     this.fluid = new Fluid(simWidth, simHeight, this.width, this.height);
     this.screenImage = new ScreenImage(null, 0, 0, this.width, this.height,
                                                     this.width, this.height);
     this.lastMouse = new Vec2(0, 0);
 
     this.drawVelocityForce = new DrawForce({
-      width:  simWidth
-    , height: simHeight
+      width:  this.width
+    , height: this.height
     , type: 'velocity'
     });
 
@@ -65,7 +65,7 @@ sys.Window.create({
     });
 
     this.drawDensityForce.strength = 2.7;
-    this.drawDensityForce.radius = 0.13;
+    this.drawDensityForce.radius = 0.03;
 
 
     this.on('mouseMoved', function (e) {
@@ -117,8 +117,6 @@ sys.Window.create({
       numSteps:           numSteps,
     }));
 
-//    var ShowTexCoords = materials.ShowTexCoords;
-//    this.mesh = new Mesh(plane, new ShowTexCoords() );
 
     this.meshWireframe = new Mesh(plane, new DisplacedMatCap({
       texture:            this.textures[2],
@@ -145,7 +143,7 @@ sys.Window.create({
     //      }
     //    }));
 
-    this.camera = new PerspectiveCamera(30, this.width / this.height);
+    this.camera = new PerspectiveCamera(90, this.width / this.height);
     this.camera.setPosition(new Vec3(0, 1.5, 1.0));
 //    this.arcball = new Arcball(this, this.camera);
 //    this.arcball.setPosition(new Vec3(0, 1.5, 1.5));
@@ -162,15 +160,13 @@ sys.Window.create({
     }.bind(this));
 
 
-//    this.gui.addTexture2D('Velocity', this.drawVelocityForce.forceBuffer.getColorAttachment(0))
-//    this.gui.addTexture2D('Density', this.drawDensityForce.forceBuffer.getColorAttachment(0))
+    this.gui.addTexture2D('Velocity', this.drawVelocityForce.forceBuffer.getColorAttachment(0))
+    this.gui.addTexture2D('Density', this.drawDensityForce.forceBuffer.getColorAttachment(0))
   },
   draw: function() {
     try {
       //disable depth test
       glu.enableDepthReadAndWrite(false, false);
-      glu.viewport(0, 0, this.fluid.width, this.fluid.height);
-      glu.viewport(0, 0, this.width, this.height);
 
       this.drawDensityForce.update();
       if (this.drawDensityForce.forceChanged) {
@@ -181,8 +177,6 @@ sys.Window.create({
         , strength: densityStrength
         });
       }
-
-
 
       this.drawVelocityForce.update();
       if (this.drawVelocityForce.forceChanged) {
@@ -196,6 +190,7 @@ sys.Window.create({
 
       var fluidTexture = this.fluid.iterate();
       glu.clearColorAndDepth(Color.Black);
+      glu.viewport(0, 0, this.width, this.height);
       this.screenImage.setImage(fluidTexture);
       this.screenImage.draw();
 
@@ -227,7 +222,7 @@ sys.Window.create({
 
       glu.enableDepthReadAndWrite(false, false);
       glu.enableAdditiveBlending(true);
-      this.mesh.draw(this.camera);
+      //this.mesh.draw(this.camera);
 
       glu.clearDepth();
       this.gui.draw();
