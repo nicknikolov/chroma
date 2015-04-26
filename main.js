@@ -26,7 +26,7 @@ var Fluid = require('./fluid/fluid');
 var DrawForce = require('./fluid/DrawForce');
 var ScreenImage = glu.ScreenImage;
 
-var TileRender = require('./TileRender');
+//var TileRender = require('./TileRender');
 var DPI = 1;
 
 sys.Window.create({
@@ -442,6 +442,6 @@ sys.Window.create({
         this.gui.items[0].dirty = true;
       }
     });
-  },
+  }
 
 });

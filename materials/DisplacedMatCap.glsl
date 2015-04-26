@@ -53,7 +53,7 @@ void main() {
 
     vec3 N = up;
 
-    pos.z += height * 5;
+    pos.z += height * 5.0;
     //pos.z = clamp(pos.z, 0.0, 0.5);
     pos.z = log2(pos.z * 50.0) / 20.0;
     gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
