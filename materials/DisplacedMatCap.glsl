@@ -53,8 +53,9 @@ void main() {
 
     vec3 N = up;
 
-    pos.z += height ;
-    pos.z = clamp(pos.z, 0.0, 0.2);
+    pos.z += height * 5;
+    //pos.z = clamp(pos.z, 0.0, 0.5);
+    pos.z = log2(pos.z * 50.0) / 20.0;
     gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
 
     e = normalize(vec3(modelViewMatrix * vec4(position, 1.0)));
@@ -93,7 +94,8 @@ void main() {
         gl_FragColor = vec4(n * 0.5 + 0.5, 1.0);
     }
 
+    gl_FragColor.w = p.z * p.z * 20.0;
+
     if (p.z < zTreshold) discard;
 }
-
 #endif

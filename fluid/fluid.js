@@ -31,9 +31,9 @@ function Fluid(simWidth, simHeight, drawWidth, drawHeight) {
   this.speed = 28;            // 0 to 100
   this.cellSize = 1.25;       // 0.0 to 2.0
   this.viscosity = 0.5;       // 0 to 1
-  this.dissipation = 0.005;   // 0 to 0.02
+  this.dissipation = 0.0017;   // 0 to 0.02
   this.clampForce = 0.07;     // 0 to 0.1
-  this.maxDensity = 0.9;      // 0 to 5
+  this.maxDensity = 4.25;      // 0 to 5
   this.maxVelocity = 4;       // 0 to 10
   //-----------------------------
 
@@ -121,7 +121,6 @@ Fluid.prototype.iterate = function () {
   this.timeStep = this.deltaTime * this.speed;
 
   glu.enableBlending(false);
-//  glu.enableAlphaBlending();
 
   // Clamp Length
   if (this.maxDensity > 0) {
@@ -245,5 +244,4 @@ Fluid.prototype.iterate = function () {
 }
 
 module.exports = Fluid;
-
 
