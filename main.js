@@ -47,7 +47,7 @@ sys.Window.create({
   showNormals:          false,
   needsRender:          false,
   preview:              true,
-  drawWithMouse:        false,
+  drawWithMouse:        true,
   dripping:             true,
   dripChance:           300,
   backgroundColour:     Color.fromHSL(0.58, 0.97, 0.07),
@@ -101,6 +101,7 @@ sys.Window.create({
     this.camera = new PerspectiveCamera(70, this.width / this.height, 0.1, 10);
     this.camera.setPosition(new Vec3(0, 0.0, 1.0));
     this.arcball = new Arcball(this, this.camera);
+    this.arcball.enabled = false;
 
     this.drawVelocityForceAuto = new DrawForce({
       width:  this.width
@@ -441,7 +442,7 @@ sys.Window.create({
         this.drawWithMouse = !this.drawWithMouse;
         this.gui.items[0].dirty = true;
       }
-    });
+    }.bind(this));
   }
 
 });
