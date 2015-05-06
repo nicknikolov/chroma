@@ -109,18 +109,18 @@ TileRender.prototype.nextTile = function() {
 TileRender.prototype.capture = function() {
   var path = this.opts.path || '.';
   var gl = Context.currentContext;
-  gl.writeImage('png', path + '/' + (this.currentTile-1) + '.png');
+  gl.writeImage('tiff', path + '/' + (this.currentTile-1) + '.tiff');
 
   if (this.currentTile == this.tiles.length) {
     var g = gm();
     this.tiles.forEach(function(tile, tileIndex) {
       g = g
         .in('-page', '+' + tile.offsetX + '+' + tile.offsetY)
-        .in('tiles/' + tileIndex + '.png')
+        .in('tiles/' + tileIndex + '.tiff')
     })
     g = g
       .mosaic()  // Merges the images as a matrix
-      .write(path + '/output.png', function (err) {
+      .write(path + '/output.tiff', function (err) {
           if (err) console.log(err);
       });
   }
