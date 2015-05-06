@@ -25,6 +25,7 @@ var DisplacedMatCap = require('./materials/DisplacedMatCap');
 var Fluid = require('./fluid/fluid');
 var DrawForce = require('./fluid/DrawForce');
 var ScreenImage = glu.ScreenImage;
+var Geometry = geom.Geometry;
 
 //var TileRender = require('./TileRender');
 var DPI = 1;
@@ -56,8 +57,17 @@ sys.Window.create({
 
   init: function() {
     var planeSize = 2;
-    var numSteps = 200;
+    var numSteps = 600;
     var plane = new Plane(planeSize, planeSize, numSteps, numSteps, 'x', 'y');
+    var texCoords = [];
+    var vertices = [];
+    plane.faces.forEach(function(f) {
+      vertices.push(plane.vertices[f[0]], plane.vertices[f[1]], plane.vertices[f[2]]);
+      vertices.push(plane.vertices[f[0]], plane.vertices[f[2]], plane.vertices[f[3]]);
+      texCoords.push(plane.texCoords[f[0]], plane.texCoords[f[1]], plane.texCoords[f[2]]);
+      texCoords.push(plane.texCoords[f[0]], plane.texCoords[f[2]], plane.texCoords[f[3]]);
+    })
+    var planeTri = new Geometry({ vertices: vertices, texCoords: texCoords });
     var planeWF = new Plane(planeSize, planeSize, numSteps, numSteps, 'x', 'y');
     var simWidth = this.width/4;
     var simHeight = this.height/4;
@@ -74,7 +84,7 @@ sys.Window.create({
     , Texture2D.load('assets/chroma3.jpg')
     ];
 
-    this.mesh = new Mesh(plane, new DisplacedMatCap({
+    this.mesh = new Mesh(planeTri, new DisplacedMatCap({
       texture:            this.textures[0],
       tint:               Color.Black,
       zTreshold:          this.zTreshold,
@@ -279,7 +289,9 @@ sys.Window.create({
     glu.enableDepthReadAndWrite(true, true);
     glu.enableAdditiveBlending(true);
     glu.enableAlphaBlending();
-    if (this.drawMetal) this.mesh.draw(camera);
+    if (this.drawMetal) {
+      this.mesh.draw(camera);
+    }
 
     //glu.clearDepth();
 
