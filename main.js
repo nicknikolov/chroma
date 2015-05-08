@@ -205,7 +205,7 @@ sys.Window.create({
         //
         var root = fx();
         var scene = root.render({ width: this.width, height: this.height,
-                                  drawFunc: this.drawScene.bind(this),
+                                  drawFunc: this.drawScene.bind(this, this.camera),
                                   depth: true });
 
         var scene = scene.blur().blur();
