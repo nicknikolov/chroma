@@ -25,14 +25,15 @@ var DisplacedMatCap = require('./materials/DisplacedMatCap');
 var Fluid = require('./fluid/fluid');
 var DrawForce = require('./fluid/DrawForce');
 var ScreenImage = glu.ScreenImage;
+var Geometry = geom.Geometry;
 
-//var TileRender = require('./TileRender');
+var TileRender = require('./TileRender');
 var DPI = 1;
 
 sys.Window.create({
   settings: {
-    width: 1280 * DPI,
-    height: 800 * DPI,
+    width: 1600 * DPI,
+    height: 1000 * DPI,
     type: '3d',
     fullscreen: Platform.isBrowser ? true : false,
     highdpi: DPI
@@ -48,16 +49,25 @@ sys.Window.create({
   needsRender:          false,
   preview:              true,
   drawWithMouse:        true,
-  dripping:             true,
+  dripping:             false,
   dripChance:           300,
   backgroundColour:     Color.fromHSL(0.58, 0.97, 0.07),
   wireframeColour:      Color.fromHSL(0.58, 0.97, 0.47),
 
 
   init: function() {
-    var planeSize = 2;
-    var numSteps = 200;
+    var planeSize = 4;
+    var numSteps = 600;
     var plane = new Plane(planeSize, planeSize, numSteps, numSteps, 'x', 'y');
+    var texCoords = [];
+    var vertices = [];
+    plane.faces.forEach(function(f) {
+      vertices.push(plane.vertices[f[0]], plane.vertices[f[1]], plane.vertices[f[2]]);
+      vertices.push(plane.vertices[f[0]], plane.vertices[f[2]], plane.vertices[f[3]]);
+      texCoords.push(plane.texCoords[f[0]], plane.texCoords[f[1]], plane.texCoords[f[2]]);
+      texCoords.push(plane.texCoords[f[0]], plane.texCoords[f[2]], plane.texCoords[f[3]]);
+    })
+    var planeTri = new Geometry({ vertices: vertices, texCoords: texCoords });
     var planeWF = new Plane(planeSize, planeSize, numSteps, numSteps, 'x', 'y');
     var simWidth = this.width/4;
     var simHeight = this.height/4;
@@ -70,16 +80,16 @@ sys.Window.create({
 
     this.textures = [
       Texture2D.load('assets/chroma.jpg')
-    , Texture2D.load('assets/chroma2.jpg')
-    , Texture2D.load('assets/chroma3.jpg')
+    , Texture2D.load('assets/chroma2.png')
+    , Texture2D.load('assets/plastic_red.jpg')
     ];
 
-    this.mesh = new Mesh(plane, new DisplacedMatCap({
+    this.mesh = new Mesh(planeTri, new DisplacedMatCap({
       texture:            this.textures[0],
       tint:               Color.Black,
       zTreshold:          this.zTreshold,
       displacementHeight: this.displacementHeight,
-      textureSize:        new Vec2(2100, 2100),
+      textureSize:        new Vec2(2100, 2100),
       planeSize:          new Vec2(planeSize, planeSize),
       numSteps:           numSteps,
     }));
@@ -95,13 +105,8 @@ sys.Window.create({
       numSteps:           numSteps
     }), { lines: true });
 
-    //this.meshWireframe.position.z = 0.005;
-
 
     this.camera = new PerspectiveCamera(70, this.width / this.height, 0.1, 10);
-    this.camera.setPosition(new Vec3(0, 0.0, 1.0));
-    this.arcball = new Arcball(this, this.camera);
-    this.arcball.enabled = false;
 
     this.drawVelocityForceAuto = new DrawForce({
       width:  this.width
@@ -123,8 +128,9 @@ sys.Window.create({
     this.drawDensityForceAuto.strength = 4.7;
     this.drawDensityForceAuto.radius = 0.06;
 
+    this.arcball = new Arcball(this, this.camera);
+    this.arcball.enabled = false;
     this.setupGui();
-
 
   },
   draw: function() {
@@ -136,7 +142,7 @@ sys.Window.create({
         this.needsRender = false;
         this.tileRender = new TileRender({
           viewport: [0, 0, this.width, this.height],
-          n: 20, //image will be 6x bigger
+          n: 10, //image will be 6x bigger
           camera: this.camera,
           path: 'tiles', //folder to save tiles to
           preview: this.preview
@@ -284,12 +290,13 @@ sys.Window.create({
     //glu.clearDepth();
 
     if (this.wireframe) this.meshWireframe.draw(camera);
+    //this.camera.setPosition(new Vec3(0.128, -1.316, 1.533));
   },
 
   setupGui: function () {
     this.gui = new GUI(this);
 
-    this.gui.addLabel('Drawing options');
+    this.gui.addHeader('Drawing options');
     this.gui.addParam('Wireframe \'w\'', this, 'wireframe');
     this.gui.addParam('Mouse Input \'x\'', this, 'drawWithMouse');
     this.gui.addParam('Arc ball \'a\'', this.arcball, 'enabled');
@@ -304,7 +311,7 @@ sys.Window.create({
 
     this.gui.addParam('z Treshold', this, 'zTreshold', {min: 0.0001, max: 0.5});
 
-    this.gui.addLabel('Fluid options');
+    this.gui.addHeader('Fluid options');
     this.gui.addParam('Iterations',  this.fluid, 'iterations', {min: 1, max:100});
     this.gui.addParam('Speed',       this.fluid, 'speed',      {min: 0, max:100});
     this.gui.addParam('Cell Size',   this.fluid, 'cellSize',   {min: 0, max:2});
@@ -325,37 +332,37 @@ sys.Window.create({
           }
         }));
 
-    this.gui.addLabel('Mouse options')
+    this.gui.addHeader('Mouse options')
       .setPosition(180, 10);
-    this.gui.addParam('Density Strength',
+    this.gui.addParam('MD Density Strength',
         this.drawDensityForce, 'strength',{min: 0, max:5});
-    this.gui.addParam('Density Radius',
+    this.gui.addParam('MD Density Radius',
         this.drawDensityForce, 'radius',{min: 0, max:0.1});
-    this.gui.addParam('Density Edge',
+    this.gui.addParam('MD Density Edge',
         this.drawDensityForce, 'edge',{min: 0, max:1});
-    this.gui.addParam('Velocity Strength',
+    this.gui.addParam('MV Velocity Strength',
         this.drawVelocityForce, 'strength',{min: 0, max:5});
-    this.gui.addParam('Velocity Radius',
+    this.gui.addParam('MV Velocity Radius',
         this.drawVelocityForce, 'radius',{min: 0, max:0.1});
-    this.gui.addParam('Velocity Edge',
+    this.gui.addParam('MV Velocity Edge',
         this.drawVelocityForce, 'edge',{min: 0, max:1});
 
 
-    this.gui.addLabel('Dripping')
+    this.gui.addHeader('Dripping')
       .setPosition(1100, 10)
     this.gui.addParam('Dripping', this, 'dripping')
     this.gui.addParam('Drip chance', this, 'dripChance', {min: 1, max: 500})
-    this.gui.addParam('Density Strength',
+    this.gui.addParam('DD Density Strength',
         this.drawDensityForceAuto, 'strength',{min: 0, max: 5})
-    this.gui.addParam('Density Radius',
+    this.gui.addParam('DD Density Radius',
         this.drawDensityForceAuto, 'radius',{min: 0, max: 0.1})
-    this.gui.addParam('Density Edge',
+    this.gui.addParam('DD Density Edge',
         this.drawDensityForceAuto, 'edge',{min: 0, max: 1})
-    this.gui.addParam('Velocity Strength',
+    this.gui.addParam('DV Velocity Strength',
         this.drawVelocityForceAuto, 'strength',{min: 0, max: 5})
-    this.gui.addParam('Velocity Radius',
+    this.gui.addParam('DV Velocity Radius',
         this.drawVelocityForceAuto, 'radius',{min: 0, max: 0.1})
-    this.gui.addParam('Velocity Edge',
+    this.gui.addParam('DV Velocity Edge',
         this.drawVelocityForceAuto, 'edge',{min: 0, max: 1})
 
     this.on('keyDown', function(e) {
@@ -383,7 +390,14 @@ sys.Window.create({
         this.arcball.enabled = !this.arcball.enabled;
         this.gui.items[0].dirty = true;
       }
+      switch(e.str) {
+        case 'g': this.gui.toggleEnabled();
+        case 'S': this.gui.save('client.gui.settings.txt'); break;
+        case 'L': this.gui.load('client.gui.settings.txt'); break;
+      }
     }.bind(this));
+
+    this.gui.load('client.gui.settings.txt');
   },
 
   setupInteractions: function() {
