@@ -54,7 +54,6 @@ void main() {
     vec3 N = up;
 
     pos.z += height * 5.0;
-    //pos.z = clamp(pos.z, 0.0, 0.5);
     pos.z = log2(pos.z * 50.0) / 20.0;
     gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
 
@@ -79,6 +78,7 @@ varying vec3 p;
 
 void main() {
     vec3 r = (reflect(e, n));
+    //vec3 r = n;
     float m = 2.0 * sqrt(r.x * r.x + r.y * r.y + (r.z + 1.0) * (r.z + 1.0));
     vec2 N = r.xy / m + 0.5;
     vec3 base = texture2D( texture, N ).rgb;
@@ -94,7 +94,9 @@ void main() {
         gl_FragColor = vec4(n * 0.5 + 0.5, 1.0);
     }
 
-    gl_FragColor.w = p.z * p.z * 20.0;
+    //gl_FragColor.w = p.z * p.z * 20.0;
+
+    gl_FragColor *= log2(p.z * p.z * 120.0) / 3.0;
 
     if (p.z < zTreshold) discard;
 }

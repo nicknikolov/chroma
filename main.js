@@ -6,6 +6,7 @@ var gen = require('pex-gen');
 var gui = require('pex-gui');
 var geom = require('pex-geom');
 var rnd = require('pex-random');
+var fx = require('pex-fx');
 
 var Cube = gen.Cube;
 var Mesh = glu.Mesh;
@@ -57,7 +58,7 @@ sys.Window.create({
 
   init: function() {
     var planeSize = 4;
-    var numSteps = 600;
+    var numSteps = 1000;
     var plane = new Plane(planeSize, planeSize, numSteps, numSteps, 'x', 'y');
     var texCoords = [];
     var vertices = [];
@@ -68,7 +69,8 @@ sys.Window.create({
       texCoords.push(plane.texCoords[f[0]], plane.texCoords[f[2]], plane.texCoords[f[3]]);
     })
     var planeTri = new Geometry({ vertices: vertices, texCoords: texCoords });
-    var planeWF = new Plane(planeSize, planeSize, numSteps, numSteps, 'x', 'y');
+    var planeWF = new Geometry({ vertices: vertices, texCoords: texCoords });
+    //var planeWF = new Plane(planeSize, planeSize, numSteps, numSteps, 'x', 'y');
     var simWidth = this.width/4;
     var simHeight = this.height/4;
     this.zTreshold = 0.01;
@@ -200,7 +202,16 @@ sys.Window.create({
         }
 
         this.fluidTexture = this.fluid.iterate();
-        this.drawScene(this.camera);
+        //
+        var root = fx();
+        var scene = root.render({ width: this.width, height: this.height,
+                                  drawFunc: this.drawScene.bind(this),
+                                  depth: true });
+
+        var scene = scene.blur().blur();
+        scene.blit({x:0, y:0, width:this.width, height: this.height});
+        //
+        //this.drawScene(this.camera);
       }
 
     } catch (e) {
@@ -208,6 +219,7 @@ sys.Window.create({
       this.draw = function(){};
     }
 
+    this.gl.viewport(0, 0, this.width, this.height);
     this.gui.draw();
   },
 
@@ -247,6 +259,7 @@ sys.Window.create({
 
     glu.clearColorAndDepth(this.backgroundColour);
     glu.viewport(0, 0, this.width, this.height);
+    glu.cullFace();
     this.screenImage.setImage(this.fluidTexture);
     if (this.drawFluid) this.screenImage.draw();
 
@@ -283,8 +296,8 @@ sys.Window.create({
 
 
     glu.enableDepthReadAndWrite(true, true);
-    glu.enableAdditiveBlending(true);
-    glu.enableAlphaBlending();
+    //glu.enableAdditiveBlending(true);
+    //glu.enableAlphaBlending();
     if (this.drawMetal) this.mesh.draw(camera);
 
     //glu.clearDepth();
