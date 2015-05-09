@@ -234,13 +234,17 @@ sys.Window.create({
     glu.viewport(0, 0, this.width, this.height);
     glu.cullFace();
 
-    this.fluidTexture = fx()
+    this.blurredFluidTexture = fx()
       .asFXStage(this.fluidTexture, 'ft')
-      .blur5()
-      .blur5()
+      .blur5({ bpp: 32 })
+      .blur5({ bpp: 32 })
+      .blur5({ bpp: 32 })
+      .blur5({ bpp: 32 })
+      .blur5({ bpp: 32 })
+      .blur5({ bpp: 32 })
       .getSourceTexture();
 
-    this.screenImage.setImage(this.fluidTexture);
+    this.screenImage.setImage(this.blurredFluidTexture);
     if (this.drawFluid) this.screenImage.draw();
 
     glu.clearDepth();
@@ -256,8 +260,10 @@ sys.Window.create({
       time                = sys.Time.seconds;
     this.mesh.material.uniforms.
       zTreshold           = this.zTreshold;
+
+    this.mesh.material.uniforms.textureSize = new Vec2(this.blurredFluidTexture.width, this.blurredFluidTexture.height)
     this.mesh.material.uniforms.
-      displacementMap     = this.fluidTexture;
+      displacementMap     = this.blurredFluidTexture;
 
     this.meshWireframe.material.uniforms.
       showNormals         = this.showNormals;
@@ -273,6 +279,11 @@ sys.Window.create({
       zTreshold           = this.zTreshold;
     this.meshWireframe.material.uniforms.
       displacementMap     = this.fluidTexture;
+
+    //not needed probably
+    var gl = this.gl;
+    this.fluidTexture.bind();
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
 
 
     glu.enableDepthReadAndWrite(true, true);
