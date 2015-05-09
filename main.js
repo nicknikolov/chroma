@@ -7,6 +7,7 @@ var gui = require('pex-gui');
 var geom = require('pex-geom');
 var rnd = require('pex-random');
 var fx = require('pex-fx');
+var fxImage = require('pex-fx');
 
 var Cube = gen.Cube;
 var Mesh = glu.Mesh;
@@ -58,7 +59,7 @@ sys.Window.create({
 
   init: function() {
     var planeSize = 4;
-    var numSteps = 1000;
+    var numSteps = 500;
     var plane = new Plane(planeSize, planeSize, numSteps, numSteps, 'x', 'y');
     var texCoords = [];
     var vertices = [];
@@ -203,15 +204,19 @@ sys.Window.create({
 
         this.fluidTexture = this.fluid.iterate();
         //
-        var root = fx();
-        var scene = root.render({ width: this.width, height: this.height,
-                                  drawFunc: this.drawScene.bind(this, this.camera),
-                                  depth: true });
+       // var root = fx();
+       // var scene = root.render({
+       //   width: this.width, height: this.height,
+       //   drawFunc: function() {
+       //     var fbo = new RenderTarget();
+       //   },
+       //   depth: true
+       // });
 
-        var scene = scene.blur().blur();
-        scene.blit({x:0, y:0, width:this.width, height: this.height});
+       // var scene = scene.blur().blur();
+       // scene.blit({x:0, y:0, width:this.width, height: this.height});
         //
-        //this.drawScene(this.camera);
+        this.drawScene(this.camera);
       }
 
     } catch (e) {
@@ -223,43 +228,18 @@ sys.Window.create({
     this.gui.draw();
   },
 
-  drip: function() {
-    var velY = rnd.float(-0.01, -0.06);
-    var posX = rnd.float(0.05, 0.95);
-    this.drawVelocityForceAuto.force = new Vec2(0, velY);
-    this.drawVelocityForceAuto.applyForce(new Vec2(posX, 0.9));
-    this.drawDensityForceAuto.applyForce(new Vec2(posX, 0.9));
-
-    this.drawDensityForceAuto.update();
-    if (this.drawDensityForceAuto.forceChanged) {
-      this.drawDensityForceAuto.forceChanged = false;
-      var densityStrength = this.drawDensityForceAuto.strength;
-      if (!this.drawDensityForceAuto.isTemporary)
-        densityStrength *= sys.Time.delta;
-      this.fluid.addDensity({
-        texture: this.drawDensityForceAuto.forceBuffer.getColorAttachment(0)
-          , strength: densityStrength
-      });
-    }
-
-    this.drawVelocityForceAuto.update();
-    if (this.drawVelocityForceAuto.forceChanged) {
-      this.drawVelocityForceAuto.forceChanged = false;
-      var velocityStrength = this.drawVelocityForceAuto.strength;
-      if (!this.drawVelocityForceAuto.isTemporary)
-        velocityStrength *= sys.Time.delta;
-      this.fluid.addVelocity({
-        texture: this.drawVelocityForceAuto.forceBuffer.getColorAttachment(0)
-          , strength: velocityStrength
-      });
-    }
-  },
-
   drawScene: function(camera) {
 
     glu.clearColorAndDepth(this.backgroundColour);
     glu.viewport(0, 0, this.width, this.height);
     glu.cullFace();
+
+    this.fluidTexture = fx()
+      .asFXStage(this.fluidTexture, 'ft')
+      .blur5()
+      .blur5()
+      .getSourceTexture();
+
     this.screenImage.setImage(this.fluidTexture);
     if (this.drawFluid) this.screenImage.draw();
 
@@ -306,6 +286,38 @@ sys.Window.create({
     //this.camera.setPosition(new Vec3(0.128, -1.316, 1.533));
   },
 
+  drip: function() {
+    var velY = rnd.float(-0.01, -0.06);
+    var posX = rnd.float(0.05, 0.95);
+    this.drawVelocityForceAuto.force = new Vec2(0, velY);
+    this.drawVelocityForceAuto.applyForce(new Vec2(posX, 0.9));
+    this.drawDensityForceAuto.applyForce(new Vec2(posX, 0.9));
+
+    this.drawDensityForceAuto.update();
+    if (this.drawDensityForceAuto.forceChanged) {
+      this.drawDensityForceAuto.forceChanged = false;
+      var densityStrength = this.drawDensityForceAuto.strength;
+      if (!this.drawDensityForceAuto.isTemporary)
+        densityStrength *= sys.Time.delta;
+      this.fluid.addDensity({
+        texture: this.drawDensityForceAuto.forceBuffer.getColorAttachment(0)
+          , strength: densityStrength
+      });
+    }
+
+    this.drawVelocityForceAuto.update();
+    if (this.drawVelocityForceAuto.forceChanged) {
+      this.drawVelocityForceAuto.forceChanged = false;
+      var velocityStrength = this.drawVelocityForceAuto.strength;
+      if (!this.drawVelocityForceAuto.isTemporary)
+        velocityStrength *= sys.Time.delta;
+      this.fluid.addVelocity({
+        texture: this.drawVelocityForceAuto.forceBuffer.getColorAttachment(0)
+          , strength: velocityStrength
+      });
+    }
+  },
+
   setupGui: function () {
     this.gui = new GUI(this);
 
@@ -336,14 +348,14 @@ sys.Window.create({
 
     this.gui.addParam('Tile preview', this, 'preview')
 
-    this.gui.addTextureList('Material', this, 'currentTexture',
-        this.textures.map(function(tex, i) {
-          return {
-            texture: tex,
-            name: 'Tex' + i,
-            value: i
-          }
-        }));
+      this.gui.addTextureList('Material', this, 'currentTexture',
+          this.textures.map(function(tex, i) {
+            return {
+              texture: tex,
+              name: 'Tex' + i,
+              value: i
+            }
+          }));
 
     this.gui.addHeader('Mouse options')
       .setPosition(180, 10);
@@ -363,52 +375,52 @@ sys.Window.create({
 
     this.gui.addHeader('Dripping')
       .setPosition(1100, 10)
-    this.gui.addParam('Dripping', this, 'dripping')
-    this.gui.addParam('Drip chance', this, 'dripChance', {min: 1, max: 500})
-    this.gui.addParam('DD Density Strength',
-        this.drawDensityForceAuto, 'strength',{min: 0, max: 5})
-    this.gui.addParam('DD Density Radius',
-        this.drawDensityForceAuto, 'radius',{min: 0, max: 0.1})
-    this.gui.addParam('DD Density Edge',
-        this.drawDensityForceAuto, 'edge',{min: 0, max: 1})
-    this.gui.addParam('DV Velocity Strength',
-        this.drawVelocityForceAuto, 'strength',{min: 0, max: 5})
-    this.gui.addParam('DV Velocity Radius',
-        this.drawVelocityForceAuto, 'radius',{min: 0, max: 0.1})
-    this.gui.addParam('DV Velocity Edge',
-        this.drawVelocityForceAuto, 'edge',{min: 0, max: 1})
+      this.gui.addParam('Dripping', this, 'dripping')
+      this.gui.addParam('Drip chance', this, 'dripChance', {min: 1, max: 500})
+      this.gui.addParam('DD Density Strength',
+          this.drawDensityForceAuto, 'strength',{min: 0, max: 5})
+      this.gui.addParam('DD Density Radius',
+          this.drawDensityForceAuto, 'radius',{min: 0, max: 0.1})
+      this.gui.addParam('DD Density Edge',
+          this.drawDensityForceAuto, 'edge',{min: 0, max: 1})
+      this.gui.addParam('DV Velocity Strength',
+          this.drawVelocityForceAuto, 'strength',{min: 0, max: 5})
+      this.gui.addParam('DV Velocity Radius',
+          this.drawVelocityForceAuto, 'radius',{min: 0, max: 0.1})
+      this.gui.addParam('DV Velocity Edge',
+          this.drawVelocityForceAuto, 'edge',{min: 0, max: 1})
 
-    this.on('keyDown', function(e) {
-      if (e.str == 'w') {
-        this.wireframe = !this.wireframe;
-        this.gui.items[0].dirty = true;
-      }
-      if (e.str == 'm') {
-        this.drawMetal = !this.drawMetal;
-        this.gui.items[0].dirty = true;
-      }
-      if (e.str == 'f') {
-        this.drawFluid = !this.drawFluid;
-        this.gui.items[0].dirty = true;
-      }
-      if (e.str == 'n') {
-        this.showNormals = !this.showNormals;
-        this.gui.items[0].dirty = true;
-      }
-      if (e.str == ' ') {
-        this.frame = 0;
-        this.needsRender = true;
-      }
-      if (e.str == 'a') {
-        this.arcball.enabled = !this.arcball.enabled;
-        this.gui.items[0].dirty = true;
-      }
-      switch(e.str) {
-        case 'g': this.gui.toggleEnabled();
-        case 'S': this.gui.save('client.gui.settings.txt'); break;
-        case 'L': this.gui.load('client.gui.settings.txt'); break;
-      }
-    }.bind(this));
+      this.on('keyDown', function(e) {
+        if (e.str == 'w') {
+          this.wireframe = !this.wireframe;
+          this.gui.items[0].dirty = true;
+        }
+        if (e.str == 'm') {
+          this.drawMetal = !this.drawMetal;
+          this.gui.items[0].dirty = true;
+        }
+        if (e.str == 'f') {
+          this.drawFluid = !this.drawFluid;
+          this.gui.items[0].dirty = true;
+        }
+        if (e.str == 'n') {
+          this.showNormals = !this.showNormals;
+          this.gui.items[0].dirty = true;
+        }
+        if (e.str == ' ') {
+          this.frame = 0;
+          this.needsRender = true;
+        }
+        if (e.str == 'a') {
+          this.arcball.enabled = !this.arcball.enabled;
+          this.gui.items[0].dirty = true;
+        }
+        switch(e.str) {
+          case 'g': this.gui.toggleEnabled();
+          case 'S': this.gui.save('client.gui.settings.txt'); break;
+          case 'L': this.gui.load('client.gui.settings.txt'); break;
+        }
+      }.bind(this));
 
     this.gui.load('client.gui.settings.txt');
   },
