@@ -7,6 +7,8 @@ var gen = require('pex-gen');
 var gui = require('pex-gui');
 var geom = require('pex-geom');
 var rnd = require('pex-random');
+var fx = require('pex-fx');
+var fxImage = require('pex-fx');
 
 var Cube = gen.Cube;
 var Mesh = glu.Mesh;
@@ -22,17 +24,20 @@ var Texture2D = glu.Texture2D;
 var Vec2 = geom.Vec2;
 var Vec3 = geom.Vec3;
 var Vec4 = geom.Vec4;
+var Mat4 = geom.Mat4;
 var DisplacedMatCap = require('./materials/DisplacedMatCap');
 var Fluid = require('./fluid/fluid');
 var DrawForce = require('./fluid/DrawForce');
 var ScreenImage = glu.ScreenImage;
+var Geometry = geom.Geometry;
+var Ray = geom.Ray;
 
 //var TileRender = require('./TileRender');
 var DPI = 1;
 
 sys.Window.create({
   settings: {
-    width: 1280 * DPI,
+    width: 1200 * DPI,
     height: 800 * DPI,
     type: '3d',
     fullscreen: Platform.isBrowser ? true : false,
@@ -49,17 +54,31 @@ sys.Window.create({
   needsRender:          false,
   preview:              true,
   drawWithMouse:        true,
-  dripping:             true,
+  dripping:             false,
   dripChance:           300,
   backgroundColour:     Color.fromHSL(0.58, 0.97, 0.07),
   wireframeColour:      Color.fromHSL(0.58, 0.97, 0.47),
-
+  userCam:              {
+    position: new Vec3(0, 0, 0),
+    viewMatrix: Mat4.create(),
+    projectionMatrix: Mat4.create()
+  },
 
   init: function() {
-    var planeSize = 2;
-    var numSteps = 200;
+    var planeSize = 10;
+    var numSteps = 600;
     var plane = new Plane(planeSize, planeSize, numSteps, numSteps, 'x', 'y');
-    var planeWF = new Plane(planeSize, planeSize, numSteps, numSteps, 'x', 'y');
+    var texCoords = [];
+    var vertices = [];
+    plane.faces.forEach(function(f) {
+      vertices.push(plane.vertices[f[0]], plane.vertices[f[1]], plane.vertices[f[2]]);
+      vertices.push(plane.vertices[f[0]], plane.vertices[f[2]], plane.vertices[f[3]]);
+      texCoords.push(plane.texCoords[f[0]], plane.texCoords[f[1]], plane.texCoords[f[2]]);
+      texCoords.push(plane.texCoords[f[0]], plane.texCoords[f[2]], plane.texCoords[f[3]]);
+    })
+    var planeTri = new Geometry({ vertices: vertices, texCoords: texCoords });
+    var planeWF = new Geometry({ vertices: vertices, texCoords: texCoords });
+    //var planeWF = new Plane(planeSize, planeSize, numSteps, numSteps, 'x', 'y');
     var simWidth = this.width/4;
     var simHeight = this.height/4;
     this.zTreshold = 0.01;
@@ -71,18 +90,18 @@ sys.Window.create({
 
     this.textures = [
       Texture2D.load('assets/chroma.jpg')
-    , Texture2D.load('assets/chroma2.jpg')
-    , Texture2D.load('assets/chroma3.jpg')
+    , Texture2D.load('assets/chroma2.png')
+    , Texture2D.load('assets/plastic_red.jpg')
     ];
 
-    this.mesh = new Mesh(plane, new DisplacedMatCap({
+    this.mesh = new Mesh(planeTri, new DisplacedMatCap({
       texture:            this.textures[0],
       tint:               Color.Black,
       zTreshold:          this.zTreshold,
       displacementHeight: this.displacementHeight,
-      textureSize:        new Vec2(2100, 2100),
+      textureSize:        new Vec2(2100, 2100),
       planeSize:          new Vec2(planeSize, planeSize),
-      numSteps:           numSteps,
+      numSteps:           numSteps
     }));
 
 
@@ -96,13 +115,8 @@ sys.Window.create({
       numSteps:           numSteps
     }), { lines: true });
 
-    //this.meshWireframe.position.z = 0.005;
 
-
-    this.camera = new PerspectiveCamera(70, this.width / this.height, 0.1, 10);
-    this.camera.setPosition(new Vec3(0, 0.0, 1.0));
-    this.arcball = new Arcball(this, this.camera);
-    this.arcball.enabled = false;
+    this.camera = new PerspectiveCamera(120, this.width / this.height, 0.1, 10);
 
     this.drawVelocityForceAuto = new DrawForce({
       width:  this.width
@@ -124,8 +138,9 @@ sys.Window.create({
     this.drawDensityForceAuto.strength = 4.7;
     this.drawDensityForceAuto.radius = 0.06;
 
+    this.arcball = new Arcball(this, this.camera);
+    this.arcball.enabled = false;
     this.setupGui();
-
 
   },
   draw: function() {
@@ -137,7 +152,7 @@ sys.Window.create({
         this.needsRender = false;
         this.tileRender = new TileRender({
           viewport: [0, 0, this.width, this.height],
-          n: 20, //image will be 6x bigger
+          n: 10, //image will be 6x bigger
           camera: this.camera,
           path: 'tiles', //folder to save tiles to
           preview: this.preview
@@ -203,7 +218,77 @@ sys.Window.create({
       this.draw = function(){};
     }
 
+    this.gl.viewport(0, 0, this.width, this.height);
     this.gui.draw();
+  },
+
+  drawScene: function(camera) {
+
+    glu.clearColorAndDepth(this.backgroundColour);
+    glu.viewport(0, 0, this.width, this.height);
+    glu.cullFace();
+
+    this.blurredFluidTexture = fx()
+      .asFXStage(this.fluidTexture, 'ft')
+      .blur5({ bpp: 32 })
+      .blur5({ bpp: 32 })
+      .blur5({ bpp: 32 })
+      .getSourceTexture();
+
+    this.screenImage.setImage(this.blurredFluidTexture);
+    if (this.drawFluid) this.screenImage.draw();
+
+    glu.clearDepth();
+    glu.enableDepthReadAndWrite(true);
+
+    this.mesh.material.uniforms.
+      showNormals         = this.showNormals;
+    this.mesh.material.uniforms.
+      displacementHeight  = this.displacementHeight;
+    this.mesh.material.uniforms.
+      texture             = this.textures[this.currentTexture];
+    this.mesh.material.uniforms.
+      time                = sys.Time.seconds;
+    this.mesh.material.uniforms.
+      zTreshold           = this.zTreshold;
+
+    this.mesh.material.uniforms.textureSize = new Vec2(this.blurredFluidTexture.width,
+                                                       this.blurredFluidTexture.height)
+    this.mesh.material.uniforms.
+      displacementMap     = this.blurredFluidTexture;
+
+    this.meshWireframe.material.uniforms.
+      showNormals         = this.showNormals;
+    this.meshWireframe.material.uniforms.
+      tint                = this.wireframeColour;
+    this.meshWireframe.material.uniforms.
+      displacementHeight  = this.displacementHeight;
+    this.meshWireframe.material.
+      texture             = this.textures[this.currentTexture];
+    this.meshWireframe.material.uniforms.
+      time                = sys.Time.seconds;
+    this.meshWireframe.material.uniforms.
+      zTreshold           = this.zTreshold;
+    this.meshWireframe.material.uniforms.
+      displacementMap     = this.fluidTexture;
+
+    //not needed probably
+    var gl = this.gl;
+    this.fluidTexture.bind();
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+
+    glu.enableDepthReadAndWrite(true, true);
+    //glu.enableAdditiveBlending(true);
+    glu.enableAlphaBlending();
+    if (this.drawMetal) this.mesh.draw(camera);
+
+    //glu.clearDepth();
+
+    if (this.wireframe) this.meshWireframe.draw(camera);
+    //this.camera.setPosition(new Vec3(0.128, -1.316, 1.533));
+    //position
+    //view matrix
+    //projection matrix
   },
 
   drip: function() {
@@ -238,59 +323,10 @@ sys.Window.create({
     }
   },
 
-  drawScene: function(camera) {
-
-    glu.clearColorAndDepth(this.backgroundColour);
-    glu.viewport(0, 0, this.width, this.height);
-    this.screenImage.setImage(this.fluidTexture);
-    if (this.drawFluid) this.screenImage.draw();
-
-    glu.clearDepth();
-    glu.enableDepthReadAndWrite(true);
-
-    this.mesh.material.uniforms.
-      showNormals         = this.showNormals;
-    this.mesh.material.uniforms.
-      displacementHeight  = this.displacementHeight;
-    this.mesh.material.uniforms.
-      texture             = this.textures[this.currentTexture];
-    this.mesh.material.uniforms.
-      time                = sys.Time.seconds;
-    this.mesh.material.uniforms.
-      zTreshold           = this.zTreshold;
-    this.mesh.material.uniforms.
-      displacementMap     = this.fluidTexture;
-
-    this.meshWireframe.material.uniforms.
-      showNormals         = this.showNormals;
-    this.meshWireframe.material.uniforms.
-      tint                = this.wireframeColour;
-    this.meshWireframe.material.uniforms.
-      displacementHeight  = this.displacementHeight;
-    this.meshWireframe.material.
-      texture             = this.textures[this.currentTexture];
-    this.meshWireframe.material.uniforms.
-      time                = sys.Time.seconds;
-    this.meshWireframe.material.uniforms.
-      zTreshold           = this.zTreshold;
-    this.meshWireframe.material.uniforms.
-      displacementMap     = this.fluidTexture;
-
-
-    glu.enableDepthReadAndWrite(true, true);
-    glu.enableAdditiveBlending(true);
-    glu.enableAlphaBlending();
-    if (this.drawMetal) this.mesh.draw(camera);
-
-    //glu.clearDepth();
-
-    if (this.wireframe) this.meshWireframe.draw(camera);
-  },
-
   setupGui: function () {
     this.gui = new GUI(this);
 
-    this.gui.addLabel('Drawing options');
+    this.gui.addHeader('Drawing options');
     this.gui.addParam('Wireframe \'w\'', this, 'wireframe');
     this.gui.addParam('Mouse Input \'x\'', this, 'drawWithMouse');
     this.gui.addParam('Arc ball \'a\'', this.arcball, 'enabled');
@@ -305,7 +341,7 @@ sys.Window.create({
 
     this.gui.addParam('z Treshold', this, 'zTreshold', {min: 0.0001, max: 0.5});
 
-    this.gui.addLabel('Fluid options');
+    this.gui.addHeader('Fluid options');
     this.gui.addParam('Iterations',  this.fluid, 'iterations', {min: 1, max:100});
     this.gui.addParam('Speed',       this.fluid, 'speed',      {min: 0, max:100});
     this.gui.addParam('Cell Size',   this.fluid, 'cellSize',   {min: 0, max:2});
@@ -317,47 +353,52 @@ sys.Window.create({
 
     this.gui.addParam('Tile preview', this, 'preview')
 
-    this.gui.addTextureList('Material', this, 'currentTexture',
-        this.textures.map(function(tex, i) {
-          return {
-            texture: tex,
-            name: 'Tex' + i,
-            value: i
-          }
-        }));
+      this.gui.addTextureList('Material', this, 'currentTexture',
+          this.textures.map(function(tex, i) {
+            return {
+              texture: tex,
+              name: 'Tex' + i,
+              value: i
+            }
+          }));
 
-    this.gui.addLabel('Mouse options')
+    this.gui.addHeader('Mouse options')
       .setPosition(180, 10);
-    this.gui.addParam('Density Strength',
+    this.gui.addParam('MD Density Strength',
         this.drawDensityForce, 'strength',{min: 0, max:5});
-    this.gui.addParam('Density Radius',
+    this.gui.addParam('MD Density Radius',
         this.drawDensityForce, 'radius',{min: 0, max:0.1});
-    this.gui.addParam('Density Edge',
+    this.gui.addParam('MD Density Edge',
         this.drawDensityForce, 'edge',{min: 0, max:1});
-    this.gui.addParam('Velocity Strength',
+    this.gui.addParam('MV Velocity Strength',
         this.drawVelocityForce, 'strength',{min: 0, max:5});
-    this.gui.addParam('Velocity Radius',
+    this.gui.addParam('MV Velocity Radius',
         this.drawVelocityForce, 'radius',{min: 0, max:0.1});
-    this.gui.addParam('Velocity Edge',
+    this.gui.addParam('MV Velocity Edge',
         this.drawVelocityForce, 'edge',{min: 0, max:1});
 
 
-    this.gui.addLabel('Dripping')
-      .setPosition(1100, 10)
-    this.gui.addParam('Dripping', this, 'dripping')
-    this.gui.addParam('Drip chance', this, 'dripChance', {min: 1, max: 500})
-    this.gui.addParam('Density Strength',
-        this.drawDensityForceAuto, 'strength',{min: 0, max: 5})
-    this.gui.addParam('Density Radius',
-        this.drawDensityForceAuto, 'radius',{min: 0, max: 0.1})
-    this.gui.addParam('Density Edge',
-        this.drawDensityForceAuto, 'edge',{min: 0, max: 1})
-    this.gui.addParam('Velocity Strength',
-        this.drawVelocityForceAuto, 'strength',{min: 0, max: 5})
-    this.gui.addParam('Velocity Radius',
-        this.drawVelocityForceAuto, 'radius',{min: 0, max: 0.1})
-    this.gui.addParam('Velocity Edge',
-        this.drawVelocityForceAuto, 'edge',{min: 0, max: 1})
+    this.gui.addHeader('Dripping')
+      .setPosition(1100, 10);
+    this.gui.addParam('Dripping', this, 'dripping');
+    this.gui.addParam('Drip chance', this, 'dripChance', {min: 1, max: 500});
+    this.gui.addParam('DD Density Strength',
+        this.drawDensityForceAuto, 'strength',{min: 0, max: 5});
+    this.gui.addParam('DD Density Radius',
+        this.drawDensityForceAuto, 'radius',{min: 0, max: 0.1});
+    this.gui.addParam('DD Density Edge',
+        this.drawDensityForceAuto, 'edge',{min: 0, max: 1});
+    this.gui.addParam('DV Velocity Strength',
+        this.drawVelocityForceAuto, 'strength',{min: 0, max: 5});
+    this.gui.addParam('DV Velocity Radius',
+        this.drawVelocityForceAuto, 'radius',{min: 0, max: 0.1});
+    this.gui.addParam('DV Velocity Edge',
+        this.drawVelocityForceAuto, 'edge',{min: 0, max: 1});
+
+    this.gui.addHeader('Camera');
+    this.gui.addParam('Camera Pos', this.userCam, 'position');
+    this.gui.addParam('Camera view', this.userCam, 'viewMatrix');
+    this.gui.addParam('Camera proj', this.userCam, 'projectionMatrix');
 
     this.on('keyDown', function(e) {
       if (e.str == 'w') {
@@ -384,7 +425,29 @@ sys.Window.create({
         this.arcball.enabled = !this.arcball.enabled;
         this.gui.items[0].dirty = true;
       }
+
+      if (e.str == 'c') {
+        this.camera.position = this.userCam.position;
+        this.arcball.position = this.userCam.position;
+        this.camera.viewMatrix = this.userCam.viewMatrix;
+        this.camera.projectionMatrix = this.userCam.projectionMatrix;
+        this.camera.updateMatrices();
+      }
+
+      if (e.str == 'C') {
+        this.userCam.position = this.camera.position;
+        this.userCam.viewMatrix = this.camera.viewMatrix;
+        this.userCam.projectionMatrix = this.camera.projectionMatrix;
+      }
+
+      switch(e.str) {
+        case 'g': this.gui.toggleEnabled();
+        case 'S': this.gui.save('client.gui.settings.txt'); break;
+        case 'L': this.gui.load('client.gui.settings.txt'); break;
+      }
     }.bind(this));
+
+    this.gui.load('client.gui.settings.txt');
   },
 
   setupInteractions: function() {
@@ -423,8 +486,26 @@ sys.Window.create({
       if (!this.drawWithMouse) return;
       var mouse = new Vec2();
 
+      // new----
+      var worldRay = this.camera.getWorldRay(e.x, e.y, this.width, this.height);
+      var planeCenter = new Vec3(0, 0, 0);
+      var planeNormal = new Vec3(0, 1, 0);
+      var hits = worldRay.hitTestPlane(planeCenter, planeNormal);
+      var hit = hits[0];
+
+      console.log(e);
+      if (hit) {
+        //console.log("hit:" + hit);
+        console.log("x: " + (hit.x + 1) / 2);
+        console.log("y: " + (hit.y + 1) / 2);
+
+      }
+      // new-----
+
       mouse.x = e.x / this.width;
       mouse.y = (this.height - e.y) / this.height;
+
+      console.log("mouse:" + mouse);
 
       var velocity = mouse.dup().sub(this.lastMouse);
       var vec = new Vec3(velocity.x, velocity.y, 0);
@@ -445,10 +526,9 @@ sys.Window.create({
       }
     }.bind(this));
   }
-
 });
 
-},{"./fluid/DrawForce":2,"./fluid/fluid":5,"./materials/DisplacedMatCap":13,"pex-color":177,"pex-gen":180,"pex-geom":195,"pex-glu":213,"pex-gui":229,"pex-materials":234,"pex-random":251,"pex-sys":255}],2:[function(require,module,exports){
+},{"./fluid/DrawForce":2,"./fluid/fluid":5,"./materials/DisplacedMatCap":13,"pex-color":177,"pex-fx":180,"pex-gen":197,"pex-geom":212,"pex-glu":230,"pex-gui":246,"pex-materials":251,"pex-random":268,"pex-sys":272}],2:[function(require,module,exports){
 var Program = require('pex-glu').Program;
 var FBO = require('pex-glu').RenderTarget;
 var FrameRenderer = require('./FrameRenderer');
@@ -493,8 +573,8 @@ DrawForce.prototype.applyForce = function (normalizedPos) {
   absPos.y *= this.height;
   var absRadius = this.radius * this.width;
 
-  if (this.isTemporary && !this.forceApplied) // && allow for multiple temporal forces
-			this.clear();
+  // && allow for multiple temporal forces
+  if (this.isTemporary && !this.forceApplied) this.clear();
 
   var typeForce = this.force.clone();
   if (this.type === 'velocity') {
@@ -538,7 +618,7 @@ DrawForce.prototype.update = function () {
 
 
 
-},{"./FrameRenderer":3,"pex-color":177,"pex-geom":195,"pex-glu":213}],3:[function(require,module,exports){
+},{"./FrameRenderer":3,"pex-color":177,"pex-geom":212,"pex-glu":230}],3:[function(require,module,exports){
 var geom = require('pex-geom');
 var Vec2 = geom.Vec2;
 var Geometry = geom.Geometry;
@@ -627,7 +707,7 @@ FrameRenderer.prototype.draw = function (program) {
 
 module.exports = FrameRenderer;
 
-},{"pex-geom":195,"pex-glu":213}],4:[function(require,module,exports){
+},{"pex-geom":212,"pex-glu":230}],4:[function(require,module,exports){
 var glu = require('pex-glu');
 var FBO = glu.RenderTarget;
 
@@ -657,7 +737,7 @@ PingPong.prototype.clear = function () {
 module.exports = PingPong;
 
 
-},{"pex-glu":213}],5:[function(require,module,exports){
+},{"pex-glu":230}],5:[function(require,module,exports){
 var glu = require('pex-glu');
 var Context = glu.Context;
 var Program = glu.Program;
@@ -906,7 +986,7 @@ Fluid.prototype.iterate = function () {
 module.exports = Fluid;
 
 
-},{"../pex-hacks/Material.js":263,"./FrameRenderer.js":3,"./PingPong.js":4,"./shaders/AddForceShader.js":6,"./shaders/AdvectShader.js":7,"./shaders/ClampLengthShader.js":8,"./shaders/DiffuseShader.js":9,"./shaders/DivergenceShader.js":10,"./shaders/JacobiShader.js":11,"./shaders/SubstractGradientShader.js":12,"merge":176,"pex-color":177,"pex-glu":213,"pex-sys":255}],6:[function(require,module,exports){
+},{"../pex-hacks/Material.js":280,"./FrameRenderer.js":3,"./PingPong.js":4,"./shaders/AddForceShader.js":6,"./shaders/AdvectShader.js":7,"./shaders/ClampLengthShader.js":8,"./shaders/DiffuseShader.js":9,"./shaders/DivergenceShader.js":10,"./shaders/JacobiShader.js":11,"./shaders/SubstractGradientShader.js":12,"merge":176,"pex-color":177,"pex-glu":230,"pex-sys":272}],6:[function(require,module,exports){
 var glu = require('pex-glu');
 var Context = glu.Context;
 var Program = glu.Program;
@@ -956,7 +1036,7 @@ AddForceShader.prototype.update = function (options) {
 
 module.exports = AddForceShader;
 
-},{"pex-geom":195,"pex-glu":213}],7:[function(require,module,exports){
+},{"pex-geom":212,"pex-glu":230}],7:[function(require,module,exports){
 var glu = require('pex-glu');
 var Context = glu.Context;
 var Program = glu.Program;
@@ -1019,7 +1099,7 @@ AdvectShader.prototype.update = function (options) {
 module.exports = AdvectShader;
 
 
-},{"pex-geom":195,"pex-glu":213}],8:[function(require,module,exports){
+},{"pex-geom":212,"pex-glu":230}],8:[function(require,module,exports){
 var glu = require('pex-glu');
 var Context = glu.Context;
 var Program = glu.Program;
@@ -1064,7 +1144,7 @@ ClampLengthShader.prototype.update = function (options) {
 
 module.exports = ClampLengthShader;
 
-},{"pex-geom":195,"pex-glu":213}],9:[function(require,module,exports){
+},{"pex-geom":212,"pex-glu":230}],9:[function(require,module,exports){
 var glu = require('pex-glu');
 var Context = glu.Context;
 var Program = glu.Program;
@@ -1115,7 +1195,7 @@ module.exports = DiffuseShader;
 
 
 
-},{"pex-geom":195,"pex-glu":213}],10:[function(require,module,exports){
+},{"pex-geom":212,"pex-glu":230}],10:[function(require,module,exports){
 var glu = require('pex-glu');
 var Context = glu.Context;
 var Program = glu.Program;
@@ -1163,7 +1243,7 @@ DivergenceShader.prototype.update = function (options) {
 
 module.exports = DivergenceShader;
 
-},{"pex-geom":195,"pex-glu":213}],11:[function(require,module,exports){
+},{"pex-geom":212,"pex-glu":230}],11:[function(require,module,exports){
 var glu = require('pex-glu');
 var Context = glu.Context;
 var Program = glu.Program;
@@ -1215,7 +1295,7 @@ JacobiShader.prototype.update = function (options) {
 module.exports = JacobiShader;
 
 
-},{"pex-geom":195,"pex-glu":213}],12:[function(require,module,exports){
+},{"pex-geom":212,"pex-glu":230}],12:[function(require,module,exports){
 var glu = require('pex-glu');
 var Context = glu.Context;
 var Program = glu.Program;
@@ -1268,7 +1348,7 @@ SubstractGradientShader.prototype.update = function (options) {
 module.exports = SubstractGradientShader;
 
 
-},{"pex-geom":195,"pex-glu":213}],13:[function(require,module,exports){
+},{"pex-geom":212,"pex-glu":230}],13:[function(require,module,exports){
 //http://www.clicktorelease.com/blog/creating-spherical-environment-mapping-shader
 
 var glu = require('pex-glu');
@@ -1280,7 +1360,7 @@ var Color = color.Color;
 var merge = require('merge');
 
 
-var DisplacedMatCapGLSL = "#ifdef VERT\n\nuniform mat4 projectionMatrix;\nuniform mat4 modelViewMatrix;\nuniform mat4 normalMatrix;\nuniform float time;\nuniform float pointSize;\nattribute vec3 position;\nattribute vec3 normal;\nattribute vec2 texCoord;\n\nvarying vec3 e;\nvarying vec3 n;\nvarying vec3 p;\n\nuniform sampler2D displacementMap;\nuniform float displacementHeight;\nuniform vec2 textureSize;\nuniform vec2 planeSize;\nuniform float numSteps;\n\n\nvoid main() {\n    vec3 pos = position;\n    float height = displacementHeight * texture2D(displacementMap, texCoord).r;\n\n    float heightRight =\n                  displacementHeight *\n                  texture2D(displacementMap, texCoord + vec2(2.0/textureSize.x, 0.0)).r;\n\n    float heightFront =\n                  displacementHeight *\n                  texture2D(displacementMap, texCoord + vec2(0.0, 2.0/textureSize.y)).r;\n\n    height = displacementHeight * texture2D(displacementMap, texCoord).r;\n    heightRight =\n              displacementHeight *\n              texture2D(displacementMap, texCoord + vec2(2.0/textureSize.x, 0.0)).r;\n\n    heightFront =\n              displacementHeight *\n              texture2D(displacementMap, texCoord + vec2(0.0, 2.0/textureSize.y)).r;\n\n    vec3 right =\n              normalize(vec3(2.0*planeSize.x/numSteps, heightRight, 0.0) -\n              vec3(0.0, height, 0.0));\n\n    vec3 front =\n              normalize(vec3(0.0, heightFront, 2.0*planeSize.y/numSteps) -\n              vec3(0.0, height, 0.0));\n\n    vec3 up = normalize(cross(right, -front));\n\n    vec3 N = up;\n\n    pos.z += height * 5.0;\n    //pos.z = clamp(pos.z, 0.0, 0.5);\n    pos.z = log2(pos.z * 50.0) / 20.0;\n    gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);\n\n    e = normalize(vec3(modelViewMatrix * vec4(position, 1.0)));\n    n = normalize(vec3(normalMatrix * vec4(N, 1.0)));\n    p = pos;\n}\n\n#endif\n\n#ifdef FRAG\n\nuniform vec4 tint;\nuniform float zTreshold;\nuniform sampler2D texture;\nuniform bool showNormals;\n\nvarying vec3 e;\nvarying vec3 n;\nvarying vec3 p;\n\n\nvoid main() {\n    vec3 r = (reflect(e, n));\n    float m = 2.0 * sqrt(r.x * r.x + r.y * r.y + (r.z + 1.0) * (r.z + 1.0));\n    vec2 N = r.xy / m + 0.5;\n    vec3 base = texture2D( texture, N ).rgb;\n\n    if (length(tint.xyz) > 0.0) {\n        gl_FragColor = tint;\n    }\n    else {\n        gl_FragColor = vec4( base, 1.0 );\n    }\n\n    if (showNormals) {\n        gl_FragColor = vec4(n * 0.5 + 0.5, 1.0);\n    }\n\n    gl_FragColor.w = p.z * p.z * 20.0;\n\n    if (p.z < zTreshold) discard;\n}\n#endif\n";
+var DisplacedMatCapGLSL = "#ifdef VERT\n\nuniform mat4 projectionMatrix;\nuniform mat4 modelViewMatrix;\nuniform mat4 normalMatrix;\nuniform float time;\nuniform float pointSize;\nattribute vec3 position;\nattribute vec3 normal;\nattribute vec2 texCoord;\n\nvarying vec3 e;\nvarying vec3 n;\nvarying vec3 p;\n\nuniform sampler2D displacementMap;\nuniform float displacementHeight;\nuniform vec2 textureSize;\nuniform vec2 planeSize;\nuniform float numSteps;\n\n\nvoid main() {\n    vec3 pos = position;\n    float height = displacementHeight * texture2D(displacementMap, texCoord).r;\n\n    float heightRight =\n                  displacementHeight *\n                  texture2D(displacementMap, texCoord + vec2(2.0/textureSize.x, 0.0)).r;\n\n    float heightFront =\n                  displacementHeight *\n                  texture2D(displacementMap, texCoord + vec2(0.0, 2.0/textureSize.y)).r;\n\n    height = displacementHeight * texture2D(displacementMap, texCoord).r;\n    heightRight =\n              displacementHeight *\n              texture2D(displacementMap, texCoord + vec2(2.0/textureSize.x, 0.0)).r;\n\n    heightFront =\n              displacementHeight *\n              texture2D(displacementMap, texCoord + vec2(0.0, 2.0/textureSize.y)).r;\n\n    vec3 right =\n              normalize(vec3(2.0*planeSize.x/numSteps, heightRight, 0.0) -\n              vec3(0.0, height, 0.0));\n\n    vec3 front =\n              normalize(vec3(0.0, heightFront, 2.0*planeSize.y/numSteps) -\n              vec3(0.0, height, 0.0));\n\n    vec3 up = normalize(cross(right, -front));\n\n    vec3 N = up;\n\n    pos.z += height * 5.0;\n    //pos.z = log2(pos.z * 50.0) / 20.0;\n    gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);\n\n    e = normalize(vec3(modelViewMatrix * vec4(position, 1.0)));\n    n = normalize(vec3(normalMatrix * vec4(N, 1.0)));\n    p = pos;\n}\n\n#endif\n\n#ifdef FRAG\n\nuniform vec4 tint;\nuniform float zTreshold;\nuniform sampler2D texture;\nuniform bool showNormals;\n\nvarying vec3 e;\nvarying vec3 n;\nvarying vec3 p;\n\n\nvoid main() {\n    //vec3 r = (reflect(e, n));\n    vec3 r = n;\n    float m = 2.0 * sqrt(r.x * r.x + r.y * r.y + (r.z + 1.0) * (r.z + 1.0));\n    vec2 N = r.xy / m + 0.5;\n    vec3 base = texture2D( texture, N ).rgb;\n\n    if (length(tint.xyz) > 0.0) {\n        gl_FragColor = tint;\n    }\n    else {\n        gl_FragColor = vec4( base, 1.0 );\n    }\n\n    if (showNormals) {\n        gl_FragColor = vec4(n * 0.5 + 0.5, 1.0);\n    }\n\n    //gl_FragColor.w = p.z * p.z * 30.0;\n\n    //gl_FragColor *= log2(p.z * p.z * 120.0) / 3.0;\n\n    //if (p.z < zTreshold) discard;\n}\n#endif\n";
 
 function DisplacedMatCap(uniforms) {
   this.gl = Context.currentContext;
@@ -1294,7 +1374,7 @@ DisplacedMatCap.prototype = Object.create(Material.prototype);
 
 module.exports = DisplacedMatCap;
 
-},{"merge":176,"pex-color":177,"pex-glu":213}],14:[function(require,module,exports){
+},{"merge":176,"pex-color":177,"pex-glu":230}],14:[function(require,module,exports){
 
 },{}],15:[function(require,module,exports){
 /*!
@@ -19388,6 +19468,596 @@ function lerp(v0, v1, t) {
 }
 module.exports = lerp
 },{}],180:[function(require,module,exports){
+var FXStage = require('./lib/FXStage');
+require('./lib/Render');
+require('./lib/Blit');
+require('./lib/Add');
+require('./lib/Blur3');
+require('./lib/Blur5');
+require('./lib/Blur');
+require('./lib/Downsample2');
+require('./lib/Downsample4');
+require('./lib/FXAA');
+require('./lib/CorrectGamma');
+require('./lib/TonemapReinhard');
+require('./lib/Save');
+require('./lib/Mult');
+require('./lib/SSAO');
+
+var globalFx;
+
+module.exports = function() {
+  if (!globalFx) {
+    globalFx = new FXStage();
+  }
+  globalFx.reset();
+  return globalFx;
+};
+
+module.exports.FXStage = FXStage;
+},{"./lib/Add":181,"./lib/Blit":182,"./lib/Blur":183,"./lib/Blur3":184,"./lib/Blur5":185,"./lib/CorrectGamma":186,"./lib/Downsample2":187,"./lib/Downsample4":188,"./lib/FXAA":189,"./lib/FXStage":191,"./lib/Mult":192,"./lib/Render":193,"./lib/SSAO":194,"./lib/Save":195,"./lib/TonemapReinhard":196}],181:[function(require,module,exports){
+var FXStage = require('./FXStage');
+
+
+var AddGLSL = "#ifdef VERT\n\nattribute vec2 position;\nattribute vec2 texCoord;\nvarying vec2 vTexCoord;\n\nvoid main() {\n  gl_Position = vec4(position, 0.0, 1.0);\n  vTexCoord = texCoord;\n}\n\n#endif\n\n#ifdef FRAG\n\nvarying vec2 vTexCoord;\nuniform sampler2D tex0;\nuniform sampler2D tex1;\nuniform float scale;\n\nvoid main() {\n  vec4 color = texture2D(tex0, vTexCoord).rgba;\n  vec4 color2 = texture2D(tex1, vTexCoord).rgba;\n\n  //color += scale * color2 * color2.a;\n\n  gl_FragColor = 1.0 - (1.0 - color) * (1.0 - color2 * scale);\n\n  //gl_FragColor.rgba = color + scale * color2;\n  //gl_FragColor.a = 1.0;\n}\n\n#endif";
+
+FXStage.prototype.add = function (source2, options) {
+  options = options || {};
+  scale = options.scale !== undefined ? options.scale : 1;
+  var outputSize = this.getOutputSize(options.width, options.height);
+  var rt = this.getRenderTarget(outputSize.width, outputSize.height, options.depth, options.bpp);
+  rt.bind();
+  this.getSourceTexture().bind(0);
+  this.getSourceTexture(source2).bind(1);
+  var program = this.getShader(AddGLSL);
+  program.use();
+  program.uniforms.tex0(0);
+  program.uniforms.tex1(1);
+  program.uniforms.scale(scale);
+  this.drawFullScreenQuad(outputSize.width, outputSize.height, null, program);
+  rt.unbind();
+  return this.asFXStage(rt, 'add');
+};
+
+module.exports = FXStage;
+},{"./FXStage":191}],182:[function(require,module,exports){
+var FXStage = require('./FXStage');
+
+FXStage.prototype.blit = function (options) {
+  options = options || {};
+  var outputSize = this.getOutputSize(options.width, options.height);
+  var x = options.x || 0;
+  var y = options.y || 0;
+  this.drawFullScreenQuadAt(x, y, outputSize.width, outputSize.height, this.getSourceTexture());
+  return this;
+};
+
+module.exports = FXStage;
+},{"./FXStage":191}],183:[function(require,module,exports){
+var geom  = require('pex-geom');
+var Vec2 = geom.Vec2;
+var FXStage = require('./FXStage');
+
+
+var BlurHGLSL = "#ifdef VERT\n\nattribute vec2 position;\nattribute vec2 texCoord;\n\nvarying vec2 vTexCoord;\n\nvoid main() {\n  gl_Position = vec4(position, 0.0, 1.0);\n  vTexCoord = texCoord;\n}\n\n#endif\n\n#ifdef FRAG\n\nvarying vec2 vTexCoord;\n\nuniform sampler2D image;\nuniform vec2 imageSize;\nuniform float amount;\n\nvec4 gauss(sampler2D image, vec2 texel, float amount) {\n  vec4 color = vec4(0.0);\n  color += 1.0/16.0 * texture2D(image, vTexCoord + vec2(texel.x * -2.0 * amount, 0.0));\n  color += 4.0/16.0 * texture2D(image, vTexCoord + vec2(texel.x * -1.0 * amount, 0.0));\n  color += 6.0/16.0 * texture2D(image, vTexCoord + vec2(texel.x *  0.0 * amount, 0.0));\n  color += 4.0/16.0 * texture2D(image, vTexCoord + vec2(texel.x *  1.0 * amount, 0.0));\n  color += 1.0/16.0 * texture2D(image, vTexCoord + vec2(texel.x *  2.0 * amount, 0.0));\n  return color;\n}\n\nvoid main() {\n  vec2 texel = vec2(1.0 / imageSize.x, 1.0 / imageSize.y);\n\n  vec4 color = gauss(image, texel, amount);\n  gl_FragColor = color;\n}\n\n#endif\n";
+var BlurVGLSL = "#ifdef VERT\n\nattribute vec2 position;\nattribute vec2 texCoord;\n\nvarying vec2 vTexCoord;\n\nvoid main() {\n  gl_Position = vec4(position, 0.0, 1.0);\n  vTexCoord = texCoord;\n}\n\n#endif\n\n#ifdef FRAG\n\nvarying vec2 vTexCoord;\n\nuniform sampler2D image;\nuniform vec2 imageSize;\nuniform float amount;\n\nvec4 gauss(sampler2D image, vec2 texel, float amount) {\n  vec4 color = vec4(0.0);\n  color += 1.0/16.0 * texture2D(image, vTexCoord + vec2(0.0, texel.y * -2.0 * amount));\n  color += 4.0/16.0 * texture2D(image, vTexCoord + vec2(0.0, texel.y * -1.0 * amount));\n  color += 6.0/16.0 * texture2D(image, vTexCoord + vec2(0.0, texel.y *  0.0 * amount));\n  color += 4.0/16.0 * texture2D(image, vTexCoord + vec2(0.0, texel.y *  1.0 * amount));\n  color += 1.0/16.0 * texture2D(image, vTexCoord + vec2(0.0, texel.y *  2.0 * amount));\n  return color;\n}\n\nvoid main() {\n  vec2 texel = vec2(1.0 / imageSize.x, 1.0 / imageSize.y);\n\n  vec4 color = gauss(image, texel, amount);\n  gl_FragColor = color;\n}\n\n#endif\n";
+
+FXStage.prototype.blur = function (options) {
+  options = options || {};
+  var amount = (typeof(options.amount) != 'undefined') ? options.amount : 1;
+  var outputSize = this.getOutputSize(options.width, options.height);
+  var rth = this.getRenderTarget(outputSize.width, outputSize.height, options.depth, options.bpp);
+  var rtv = this.getRenderTarget(outputSize.width, outputSize.height, options.depth, options.bpp);
+  var source = this.getSourceTexture();
+  var programH = this.getShader(BlurHGLSL);
+  programH.use();
+  programH.uniforms.imageSize(Vec2.create(source.width, source.height));
+  programH.uniforms.amount(amount);
+  rth.bindAndClear();
+  this.drawFullScreenQuad(outputSize.width, outputSize.height, source, programH);
+  rth.unbind();
+  var programV = this.getShader(BlurVGLSL);
+  programV.use();
+  programV.uniforms.imageSize(Vec2.create(source.width, source.height));
+  programV.uniforms.amount(amount);
+  rtv.bindAndClear();
+  this.drawFullScreenQuad(outputSize.width, outputSize.height, rth.getColorAttachment(0), programV);
+  rtv.unbind();
+  return this.asFXStage(rtv, 'blur');
+};
+
+module.exports = FXStage;
+},{"./FXStage":191,"pex-geom":212}],184:[function(require,module,exports){
+var geom  = require('pex-geom');
+var Vec2 = geom.Vec2;
+var FXStage = require('./FXStage');
+
+
+var Blur3HGLSL = "#ifdef VERT\n\nattribute vec2 position;\nattribute vec2 texCoord;\n\nvarying vec2 vTexCoord;\n\nvoid main() {\n  gl_Position = vec4(position, 0.0, 1.0);\n  vTexCoord = texCoord;\n}\n\n#endif\n\n#ifdef FRAG\n\nvarying vec2 vTexCoord;\n\nuniform sampler2D image;\nuniform vec2 imageSize;\n\nvoid main() {\n  vec2 texel = vec2(1.0 / imageSize.x, 1.0 / imageSize.y);\n\n  vec4 color = vec4(0.0);\n  color += 0.25 * texture2D(image, vTexCoord + vec2(texel.x * -1.0, 0.0));\n  color += 0.50 * texture2D(image, vTexCoord);\n  color += 0.25 * texture2D(image, vTexCoord + vec2(texel.x *  1.0, 0.0));\n  gl_FragColor = color;\n}\n\n#endif\n";
+var Blur3VGLSL = "#ifdef VERT\n\nattribute vec2 position;\nattribute vec2 texCoord;\n\nvarying vec2 vTexCoord;\n\nvoid main() {\n  gl_Position = vec4(position, 0.0, 1.0);\n  vTexCoord = texCoord;\n}\n\n#endif\n\n#ifdef FRAG\n\nvarying vec2 vTexCoord;\n\nuniform sampler2D image;\nuniform vec2 imageSize;\n\nvoid main() {\n  vec2 texel = vec2(1.0 / imageSize.x, 1.0 / imageSize.y);\n\n  vec4 color = vec4(0.0);\n  color += 0.25 * texture2D(image, vTexCoord + vec2(0.0, texel.y * -1.0));\n  color += 0.50 * texture2D(image, vTexCoord);\n  color += 0.25 * texture2D(image, vTexCoord + vec2(0.0, texel.y *  1.0));\n  gl_FragColor = color;\n}\n\n#endif\n";
+
+FXStage.prototype.blur3 = function (options) {
+  options = options || {};
+  var outputSize = this.getOutputSize(options.width, options.height);
+  var rth = this.getRenderTarget(outputSize.width, outputSize.height, options.depth, options.bpp);
+  var rtv = this.getRenderTarget(outputSize.width, outputSize.height, options.depth, options.bpp);
+  var source = this.getSourceTexture();
+  var programH = this.getShader(Blur3HGLSL);
+  programH.use();
+  programH.uniforms.imageSize(Vec2.create(source.width, source.height));
+  rth.bindAndClear();
+  this.drawFullScreenQuad(outputSize.width, outputSize.height, source, programH);
+  rth.unbind();
+  var programV = this.getShader(Blur3VGLSL);
+  programV.use();
+  programV.uniforms.imageSize(Vec2.create(source.width, source.height));
+  rtv.bindAndClear();
+  this.drawFullScreenQuad(outputSize.width, outputSize.height, rth.getColorAttachment(0), programV);
+  rtv.unbind();
+  return this.asFXStage(rtv, 'blur3');
+};
+
+module.exports = FXStage;
+},{"./FXStage":191,"pex-geom":212}],185:[function(require,module,exports){
+var geom  = require('pex-geom');
+var Vec2 = geom.Vec2;
+var FXStage = require('./FXStage');
+
+
+var Blur5HGLSL = "#ifdef VERT\n\nattribute vec2 position;\nattribute vec2 texCoord;\n\nvarying vec2 vTexCoord;\n\nvoid main() {\n  gl_Position = vec4(position, 0.0, 1.0);\n  vTexCoord = texCoord;\n}\n\n#endif\n\n#ifdef FRAG\n\nvarying vec2 vTexCoord;\n\nuniform sampler2D image;\nuniform vec2 imageSize;\n\nvoid main() {\n  vec2 texel = vec2(1.0 / imageSize.x, 1.0 / imageSize.y);\n\n  vec4 color = vec4(0.0);\n  color += 1.0/16.0 * texture2D(image, vTexCoord + vec2(texel.x * -2.0, 0.0));\n  color += 4.0/16.0 * texture2D(image, vTexCoord + vec2(texel.x * -1.0, 0.0));\n  color += 6.0/16.0 * texture2D(image, vTexCoord + vec2(texel.x *  0.0, 0.0));\n  color += 4.0/16.0 * texture2D(image, vTexCoord + vec2(texel.x *  1.0, 0.0));\n  color += 1.0/16.0 * texture2D(image, vTexCoord + vec2(texel.x *  2.0, 0.0));\n  gl_FragColor = color;\n}\n\n#endif\n";
+var Blur5VGLSL = "#ifdef VERT\n\nattribute vec2 position;\nattribute vec2 texCoord;\n\nvarying vec2 vTexCoord;\n\nvoid main() {\n  gl_Position = vec4(position, 0.0, 1.0);\n  vTexCoord = texCoord;\n}\n\n#endif\n\n#ifdef FRAG\n\nvarying vec2 vTexCoord;\n\nuniform sampler2D image;\nuniform vec2 imageSize;\n\nvoid main() {\n  vec2 texel = vec2(1.0 / imageSize.x, 1.0 / imageSize.y);\n\n  vec4 color = vec4(0.0);\n  color += 1.0/16.0 * texture2D(image, vTexCoord + vec2(0.0, texel.y * -2.0));\n  color += 4.0/16.0 * texture2D(image, vTexCoord + vec2(0.0, texel.y * -1.0));\n  color += 6.0/16.0 * texture2D(image, vTexCoord + vec2(0.0, texel.y *  0.0));\n  color += 4.0/16.0 * texture2D(image, vTexCoord + vec2(0.0, texel.y *  1.0));\n  color += 1.0/16.0 * texture2D(image, vTexCoord + vec2(0.0, texel.y *  2.0));\n  gl_FragColor = color;\n}\n\n#endif\n";
+
+FXStage.prototype.blur5 = function (options) {
+  options = options || {};
+  var outputSize = this.getOutputSize(options.width, options.height);
+  var rth = this.getRenderTarget(outputSize.width, outputSize.height, options.depth, options.bpp);
+  var rtv = this.getRenderTarget(outputSize.width, outputSize.height, options.depth, options.bpp);
+  var source = this.getSourceTexture();
+  var programH = this.getShader(Blur5HGLSL);
+  programH.use();
+  programH.uniforms.imageSize(Vec2.create(source.width, source.height));
+  rth.bindAndClear();
+  this.drawFullScreenQuad(outputSize.width, outputSize.height, source, programH);
+  rth.unbind();
+  var programV = this.getShader(Blur5VGLSL);
+  programV.use();
+  programV.uniforms.imageSize(Vec2.create(source.width, source.height));
+  rtv.bindAndClear();
+  this.drawFullScreenQuad(outputSize.width, outputSize.height, rth.getColorAttachment(0), programV);
+  rtv.unbind();
+  return this.asFXStage(rtv, 'blur5');
+};
+
+module.exports = FXStage;
+},{"./FXStage":191,"pex-geom":212}],186:[function(require,module,exports){
+var FXStage = require('./FXStage');
+
+
+var CorrectGammaGLSL = "#ifdef VERT\n\nattribute vec2 position;\nattribute vec2 texCoord;\nvarying vec2 vTexCoord;\n\nvoid main() {\n  gl_Position = vec4(position, 0.0, 1.0);\n  vTexCoord = texCoord;\n}\n\n#endif\n\n#ifdef FRAG\n\nvarying vec2 vTexCoord;\nuniform sampler2D tex0;\n\nvoid main() {\n  vec4 color = texture2D(tex0, vTexCoord).rgba;\n  vec3 retColor = pow(color.rgb, vec3(1.0/2.2)); //map gamma\n  gl_FragColor.rgb = retColor;\n  gl_FragColor.a = 1.0;\n}\n\n#endif";
+
+FXStage.prototype.correctGamma = function (options) {
+  options = options || {};
+  var outputSize = this.getOutputSize(options.width, options.height);
+  var rt = this.getRenderTarget(outputSize.width, outputSize.height, options.depth, options.bpp);
+  rt.bind();
+  this.getSourceTexture().bind(0);
+  var program = this.getShader(CorrectGammaGLSL);
+  program.use();
+  program.uniforms.tex0(0);
+  this.drawFullScreenQuad(outputSize.width, outputSize.height, null, program);
+  rt.unbind();
+  return this.asFXStage(rt, 'correctGamma');
+};
+
+module.exports = FXStage;
+},{"./FXStage":191}],187:[function(require,module,exports){
+var geom  = require('pex-geom');
+var Vec2 = geom.Vec2;
+var FXStage = require('./FXStage');
+
+
+var Downsample2GLSL = "#ifdef VERT\n\nattribute vec2 position;\nattribute vec2 texCoord;\n\nvarying vec2 vTexCoord;\n\nvoid main() {\n  gl_Position = vec4(position, 0.0, 1.0);\n  vTexCoord = texCoord;\n}\n\n#endif\n\n#ifdef FRAG\n\nvarying vec2 vTexCoord;\n\nuniform sampler2D image;\nuniform vec2 imageSize;\n\nvoid main() {\n  vec2 texel = vec2(1.0 / imageSize.x, 1.0 / imageSize.y);\n  vec4 color = vec4(0.0);\n  color += texture2D(image, vTexCoord + vec2(texel.x * -1.0, texel.y * -1.0));\n  color += texture2D(image, vTexCoord + vec2(texel.x *  0.0, texel.y * -1.0));\n  color += texture2D(image, vTexCoord + vec2(texel.x * -1.0, texel.y *  0.0));\n  color += texture2D(image, vTexCoord + vec2(texel.x *  0.0, texel.y *  0.0));\n  gl_FragColor = color / 4.0;\n}\n\n#endif";
+
+FXStage.prototype.downsample2 = function (options) {
+  options = options || {};
+  var outputSize = this.getOutputSize(options.width, options.height);
+  outputSize.width /= 2;
+  outputSize.height /= 2;
+  var rt = this.getRenderTarget(outputSize.width, outputSize.height, options.depth, options.bpp);
+  var source = this.getSourceTexture();
+  var program = this.getShader(Downsample2GLSL);
+  program.use();
+  program.uniforms.imageSize(Vec2.create(source.width, source.height));
+  rt.bindAndClear();
+  this.drawFullScreenQuad(outputSize.width, outputSize.height, source, program);
+  rt.unbind();
+  return this.asFXStage(rt, 'downsample2');
+};
+
+module.exports = FXStage;
+},{"./FXStage":191,"pex-geom":212}],188:[function(require,module,exports){
+var geom  = require('pex-geom');
+var Vec2 = geom.Vec2;
+var FXStage = require('./FXStage');
+
+
+var Downsample4GLSL = "#ifdef VERT\n\nattribute vec2 position;\nattribute vec2 texCoord;\n\nvarying vec2 vTexCoord;\n\nvoid main() {\n  gl_Position = vec4(position, 0.0, 1.0);\n  vTexCoord = texCoord;\n}\n\n#endif\n\n#ifdef FRAG\n\nvarying vec2 vTexCoord;\n\nuniform sampler2D image;\nuniform vec2 imageSize;\n\nvoid main() {\n  vec2 texel = vec2(1.0 / imageSize.x, 1.0 / imageSize.y);\n  vec4 color = vec4(0.0);\n  color += texture2D(image, vTexCoord + vec2(texel.x * -2.0, texel.y * -2.0));\n  color += texture2D(image, vTexCoord + vec2(texel.x * -1.0, texel.y * -2.0));\n  color += texture2D(image, vTexCoord + vec2(texel.x *  0.0, texel.y * -2.0));\n  color += texture2D(image, vTexCoord + vec2(texel.x *  1.0, texel.y * -2.0));\n  color += texture2D(image, vTexCoord + vec2(texel.x * -2.0, texel.y * -1.0));\n  color += texture2D(image, vTexCoord + vec2(texel.x * -1.0, texel.y * -1.0));\n  color += texture2D(image, vTexCoord + vec2(texel.x *  0.0, texel.y * -1.0));\n  color += texture2D(image, vTexCoord + vec2(texel.x *  1.0, texel.y * -1.0));\n  color += texture2D(image, vTexCoord + vec2(texel.x * -2.0, texel.y *  0.0));\n  color += texture2D(image, vTexCoord + vec2(texel.x * -1.0, texel.y *  0.0));\n  color += texture2D(image, vTexCoord + vec2(texel.x *  0.0, texel.y *  0.0));\n  color += texture2D(image, vTexCoord + vec2(texel.x *  1.0, texel.y *  0.0));\n  color += texture2D(image, vTexCoord + vec2(texel.x * -2.0, texel.y *  1.0));\n  color += texture2D(image, vTexCoord + vec2(texel.x * -1.0, texel.y *  1.0));\n  color += texture2D(image, vTexCoord + vec2(texel.x *  0.0, texel.y *  1.0));\n  color += texture2D(image, vTexCoord + vec2(texel.x *  1.0, texel.y *  1.0));\n  gl_FragColor = color / 16.0;\n}\n\n#endif";
+
+FXStage.prototype.downsample4 = function (options) {
+  options = options || {};
+  var outputSize = this.getOutputSize(options.width, options.height, true);
+  outputSize.width /= 4;
+  outputSize.height /= 4;
+  var rt = this.getRenderTarget(outputSize.width, outputSize.height, options.depth, options.bpp);
+  var source = this.getSourceTexture();
+  var program = this.getShader(Downsample4GLSL);
+  program.use();
+  program.uniforms.imageSize(Vec2.create(source.width, source.height));
+  rt.bindAndClear();
+  this.drawFullScreenQuad(outputSize.width, outputSize.height, source, program);
+  rt.unbind();
+  return this.asFXStage(rt, 'downsample4');
+};
+
+module.exports = FXStage;
+},{"./FXStage":191,"pex-geom":212}],189:[function(require,module,exports){
+var geom  = require('pex-geom');
+var FXStage = require('./FXStage');
+
+
+var FXAAGLSL = "#ifdef VERT\n\nfloat FXAA_SUBPIX_SHIFT = 1.0/4.0;\n\nuniform float rtWidth;\nuniform float rtHeight;\nattribute vec2 position;\nattribute vec2 texCoord;\nvarying vec4 posPos;\n\nvoid main() {\n  gl_Position = vec4(position, 0.0, 1.0);\n\n  vec2 rcpFrame = vec2(1.0/rtWidth, 1.0/rtHeight);\n  posPos.xy = texCoord.xy;\n  posPos.zw = texCoord.xy - (rcpFrame * (0.5 + FXAA_SUBPIX_SHIFT));\n}\n\n#endif\n\n#ifdef FRAG\n\n#define FXAA_REDUCE_MIN   (1.0/ 128.0)\n#define FXAA_REDUCE_MUL   (1.0 / 8.0)\n#define FXAA_SPAN_MAX     8.0\n\nuniform sampler2D tex0;\nvarying vec4 posPos;\nuniform float rtWidth;\nuniform float rtHeight;\n\n\nvec4 applyFXAA(vec2 fragCoord, sampler2D tex)\n{\n    vec4 color;\n    vec2 inverseVP = vec2(1.0 / rtWidth, 1.0 / rtHeight);\n    vec3 rgbNW = texture2D(tex, (fragCoord + vec2(-1.0, -1.0)) * inverseVP).xyz;\n    vec3 rgbNE = texture2D(tex, (fragCoord + vec2(1.0, -1.0)) * inverseVP).xyz;\n    vec3 rgbSW = texture2D(tex, (fragCoord + vec2(-1.0, 1.0)) * inverseVP).xyz;\n    vec3 rgbSE = texture2D(tex, (fragCoord + vec2(1.0, 1.0)) * inverseVP).xyz;\n    vec3 rgbM  = texture2D(tex, fragCoord  * inverseVP).xyz;\n    vec3 luma = vec3(0.299, 0.587, 0.114);\n    float lumaNW = dot(rgbNW, luma);\n    float lumaNE = dot(rgbNE, luma);\n    float lumaSW = dot(rgbSW, luma);\n    float lumaSE = dot(rgbSE, luma);\n    float lumaM  = dot(rgbM,  luma);\n    float lumaMin = min(lumaM, min(min(lumaNW, lumaNE), min(lumaSW, lumaSE)));\n    float lumaMax = max(lumaM, max(max(lumaNW, lumaNE), max(lumaSW, lumaSE)));\n\n    //return texture2D(tex, fragCoord);\n    //return vec4(fragCoord, 0.0, 1.0);\n    //return vec4(rgbM, 1.0);\n\n    vec2 dir;\n    dir.x = -((lumaNW + lumaNE) - (lumaSW + lumaSE));\n    dir.y =  ((lumaNW + lumaSW) - (lumaNE + lumaSE));\n\n    float dirReduce = max((lumaNW + lumaNE + lumaSW + lumaSE) *\n                          (0.25 * FXAA_REDUCE_MUL), FXAA_REDUCE_MIN);\n\n    float rcpDirMin = 1.0 / (min(abs(dir.x), abs(dir.y)) + dirReduce);\n    dir = min(vec2(FXAA_SPAN_MAX, FXAA_SPAN_MAX),\n              max(vec2(-FXAA_SPAN_MAX, -FXAA_SPAN_MAX),\n              dir * rcpDirMin)) * inverseVP;\n\n    vec3 rgbA = 0.5 * (\n        texture2D(tex, fragCoord * inverseVP + dir * (1.0 / 3.0 - 0.5)).xyz +\n        texture2D(tex, fragCoord * inverseVP + dir * (2.0 / 3.0 - 0.5)).xyz);\n    vec3 rgbB = rgbA * 0.5 + 0.25 * (\n        texture2D(tex, fragCoord * inverseVP + dir * -0.5).xyz +\n        texture2D(tex, fragCoord * inverseVP + dir * 0.5).xyz);\n\n    float lumaB = dot(rgbB, luma);\n    if ((lumaB < lumaMin) || (lumaB > lumaMax))\n        color = vec4(rgbA, 1.0);\n    else\n        color = vec4(rgbB, 1.0);\n    return color;\n}\n\nvoid main() {\n  gl_FragColor = applyFXAA(posPos.xy * vec2(rtWidth, rtHeight), tex0);\n}\n\n//#version 120\n/*\nuniform sampler2D tex0;\nvarying vec4 posPos;\nuniform float rtWidth;\nuniform float rtHeight;\nfloat FXAA_SPAN_MAX = 8.0;\nfloat FXAA_REDUCE_MUL = 1.0/8.0;\n\n#define FxaaInt2 ivec2\n#define FxaaFloat2 vec2\n#define FxaaTexLod0(t, p) texture2DLod(t, p, 0.0)\n#define FxaaTexOff(t, p, o, r) texture2DLodOffset(t, p, 0.0, o)\n\nvec3 FxaaPixelShader(\n  vec4 posPos, // Output of FxaaVertexShader interpolated across screen.\n  sampler2D tex, // Input texture.\n  vec2 rcpFrame) // Constant {1.0/frameWidth, 1.0/frameHeight}.\n{\n//---------------------------------------------------------\n    #define FXAA_REDUCE_MIN   (1.0/128.0)\n    //#define FXAA_REDUCE_MUL   (1.0/8.0)\n    //#define FXAA_SPAN_MAX     8.0\n//---------------------------------------------------------\n    vec3 rgbNW = FxaaTexLod0(tex, posPos.zw).xyz;\n    vec3 rgbNE = FxaaTexOff(tex, posPos.zw, FxaaInt2(1,0), rcpFrame.xy).xyz;\n    vec3 rgbSW = FxaaTexOff(tex, posPos.zw, FxaaInt2(0,1), rcpFrame.xy).xyz;\n    vec3 rgbSE = FxaaTexOff(tex, posPos.zw, FxaaInt2(1,1), rcpFrame.xy).xyz;\n    vec3 rgbM  = FxaaTexLod0(tex, posPos.xy).xyz;\n//---------------------------------------------------------\n    vec3 luma = vec3(0.299, 0.587, 0.114);\n    float lumaNW = dot(rgbNW, luma);\n    float lumaNE = dot(rgbNE, luma);\n    float lumaSW = dot(rgbSW, luma);\n    float lumaSE = dot(rgbSE, luma);\n    float lumaM  = dot(rgbM,  luma);\n/*---------------------------------------------------------\n    float lumaMin = min(lumaM, min(min(lumaNW, lumaNE), min(lumaSW, lumaSE)));\n    float lumaMax = max(lumaM, max(max(lumaNW, lumaNE), max(lumaSW, lumaSE)));\n/*---------------------------------------------------------\n    vec2 dir;\n    dir.x = -((lumaNW + lumaNE) - (lumaSW + lumaSE));\n    dir.y =  ((lumaNW + lumaSW) - (lumaNE + lumaSE));\n/*---------------------------------------------------------\n    float dirReduce = max(\n        (lumaNW + lumaNE + lumaSW + lumaSE) * (0.25 * FXAA_REDUCE_MUL),\n        FXAA_REDUCE_MIN);\n    float rcpDirMin = 1.0/(min(abs(dir.x), abs(dir.y)) + dirReduce);\n    dir = min(FxaaFloat2( FXAA_SPAN_MAX,  FXAA_SPAN_MAX),\n          max(FxaaFloat2(-FXAA_SPAN_MAX, -FXAA_SPAN_MAX),\n          dir * rcpDirMin)) * rcpFrame.xy;\n/*--------------------------------------------------------\n    vec3 rgbA = (1.0/2.0) * (\n        FxaaTexLod0(tex, posPos.xy + dir * (1.0/3.0 - 0.5)).xyz +\n        FxaaTexLod0(tex, posPos.xy + dir * (2.0/3.0 - 0.5)).xyz);\n    vec3 rgbB = rgbA * (1.0/2.0) + (1.0/4.0) * (\n        FxaaTexLod0(tex, posPos.xy + dir * (0.0/3.0 - 0.5)).xyz +\n        FxaaTexLod0(tex, posPos.xy + dir * (3.0/3.0 - 0.5)).xyz);\n    float lumaB = dot(rgbB, luma);\n    if((lumaB < lumaMin) || (lumaB > lumaMax)) return rgbA;\n    return rgbB; }\n\nvec4 PostFX(sampler2D tex, vec2 uv, float time)\n{\n  vec4 c = vec4(0.0);\n  vec2 rcpFrame = vec2(1.0/rt_w, 1.0/rt_h);\n  c.rgb = FxaaPixelShader(posPos, tex, rcpFrame);\n  //c.rgb = 1.0 - texture2D(tex, posPos.xy).rgb;\n  c.a = 1.0;\n  return c;\n}\n\nvoid main()\n{\n  vec2 uv = posPos.xy;\n  gl_FragColor = PostFX(tex0, uv, 0.0);\n}\n\n*/\n\n#endif";
+
+FXStage.prototype.fxaa = function (options) {
+  options = options || {};
+  var outputSize = this.getOutputSize(options.width, options.height);
+  var rt = this.getRenderTarget(outputSize.width, outputSize.height, options.depth, options.bpp);
+  rt.bind();
+  var source = this.getSourceTexture();
+  source.bind();
+  var program = this.getShader(FXAAGLSL);
+  program.use();
+  program.uniforms.rtWidth(source.width);
+  program.uniforms.rtHeight(source.height);
+  this.drawFullScreenQuad(outputSize.width, outputSize.height, null, program);
+  rt.unbind();
+  return this.asFXStage(rt, 'fxaa');
+};
+
+module.exports = FXStage;
+},{"./FXStage":191,"pex-geom":212}],190:[function(require,module,exports){
+function FXResourceMgr() {
+  this.cache = [];
+}
+
+FXResourceMgr.prototype.getResource = function(type, properties) {
+  properties = properties || {};
+  for (var i = 0; i < this.cache.length; i++) {
+    var res = this.cache[i];
+    if (res.type == type && !res.used) {
+      var areTheSame = true;
+      for (var propName in properties) {
+        if (properties[propName] != res.properties[propName]) {
+          areTheSame = false;
+        }
+      }
+      if (areTheSame)
+        return res;
+    }
+  }
+  return null;
+};
+
+FXResourceMgr.prototype.addResource = function(type, obj, properties) {
+  var res = {
+    type: type,
+    obj: obj,
+    properties: properties
+  };
+  this.cache.push(res);
+  return res;
+};
+
+FXResourceMgr.prototype.markAllAsNotUsed = function() {
+  for (var i = 0; i < this.cache.length; i++) {
+    this.cache[i].used = false;
+  }
+};
+
+module.exports = FXResourceMgr;
+},{}],191:[function(require,module,exports){
+var glu = require('pex-glu');
+var Context = glu.Context;
+var ScreenImage = glu.ScreenImage;
+var RenderTarget = glu.RenderTarget;
+var Program = glu.Program;
+var Texture2D = glu.Texture2D;
+var FXResourceMgr = require('./FXResourceMgr');
+
+var FXStageCount = 0;
+
+function FXStage(source, resourceMgr, fullscreenQuad) {
+  this.id = FXStageCount++;
+  this.gl = Context.currentContext;
+  this.source = source || null;
+  this.resourceMgr = resourceMgr || new FXResourceMgr();
+  this.fullscreenQuad = fullscreenQuad || new ScreenImage();
+  this.defaultBPP = 8;
+}
+
+FXStage.prototype.reset = function() {
+  this.resourceMgr.markAllAsNotUsed();
+};
+
+FXStage.prototype.getOutputSize = function(width, height, verbose) {
+  if (width && height) {
+    return {
+      width: width,
+      height: height
+    };
+  }
+  else if (this.source) {
+    return {
+      width: this.source.width,
+      height: this.source.height
+    };
+  }
+  else {
+    var viewport = this.gl.getParameter(this.gl.VIEWPORT);
+    return {
+      width: viewport[2],
+      height: viewport[3]
+    };
+  }
+};
+
+FXStage.prototype.getRenderTarget = function(w, h, depth, bpp) {
+  depth = depth || false;
+  bpp = bpp || this.defaultBPP;
+  var resProps = {
+    w: w,
+    h: h,
+    depth: depth,
+    bpp: bpp
+  };
+  var res = this.resourceMgr.getResource('RenderTarget', resProps);
+  if (!res) {
+    var renderTarget = new RenderTarget(w, h, resProps);
+    res = this.resourceMgr.addResource('RenderTarget', renderTarget, resProps);
+  }
+  res.used = true;
+  return res.obj;
+};
+
+FXStage.prototype.getFXStage = function(name) {
+  var resProps = {};
+  var res = this.resourceMgr.getResource('FXStage', resProps);
+  if (!res) {
+    var fxState = new FXStage(null, this.resourceMgr, this.fullscreenQuad);
+    res = this.resourceMgr.addResource('FXStage', fxState, resProps);
+  }
+  res.used = true;
+  return res.obj;
+};
+
+FXStage.prototype.asFXStage = function(source, name) {
+  var stage = this.getFXStage(name);
+  stage.source = source;
+  stage.name = name + '_' + stage.id;
+  return stage;
+};
+
+FXStage.prototype.getShader = function(code) {
+  if (code.indexOf('.glsl') == code.length - 5) {
+    throw 'FXStage.getShader - loading files not supported yet.';
+  }
+  var resProps = { code: code };
+  var res = this.resourceMgr.getResource('Program', resProps);
+  if (!res) {
+    var program = new Program(code);
+    res = this.resourceMgr.addResource('Program', program, resProps);
+  }
+  res.used = true;
+  return res.obj;
+};
+
+FXStage.prototype.getSourceTexture = function(source) {
+  if (source) {
+    if (source.source) {
+      if (source.source.getColorAttachment) {
+        return source.source.getColorAttachment(0);
+      }
+      else return source.source;
+    }
+    else if (source.getColorAttachment) {
+      return source.getColorAttachment(0);
+    }
+    else return source;
+  }
+  else if (this.source) {
+    if (this.source.getColorAttachment) {
+      return this.source.getColorAttachment(0);
+    }
+    else return this.source;
+  }
+  else throw 'FXStage.getSourceTexture() No source texture!';
+};
+
+FXStage.prototype.drawFullScreenQuad = function(width, height, image, program) {
+  this.drawFullScreenQuadAt(0, 0, width, height, image, program);
+};
+
+FXStage.prototype.drawFullScreenQuadAt = function(x, y, width, height, image, program) {
+  var gl = this.gl;
+  gl.disable(gl.DEPTH_TEST);
+  var oldViewport = gl.getParameter(gl.VIEWPORT);
+  //false disables scissor test just in case
+  glu.viewport(x, y, width, height, false);
+  this.fullscreenQuad.draw(image, program);
+  glu.viewport(oldViewport[0], oldViewport[1], oldViewport[2], oldViewport[3], false);
+};
+
+FXStage.prototype.getImage = function(path) {
+  var resProps = { path: path };
+  var res = this.resourceMgr.getResource('Image', resProps);
+  if (!res) {
+    var image = Texture2D.load(path);
+    res = this.resourceMgr.addResource('Image', image, resProps);
+  }
+  res.used = false;
+  //can be shared so no need for locking
+  return res.obj;
+};
+
+FXStage.prototype.getFullScreenQuad = function() {
+  return this.fullscreenQuad;
+};
+
+module.exports = FXStage;
+},{"./FXResourceMgr":190,"pex-glu":230}],192:[function(require,module,exports){
+var FXStage = require('./FXStage');
+
+
+var MultGLSL = "#ifdef VERT\n\nattribute vec2 position;\nattribute vec2 texCoord;\nvarying vec2 vTexCoord;\n\nvoid main() {\n  gl_Position = vec4(position, 0.0, 1.0);\n  vTexCoord = texCoord;\n}\n\n#endif\n\n#ifdef FRAG\n\nvarying vec2 vTexCoord;\nuniform sampler2D tex0;\nuniform sampler2D tex1;\n\nvoid main() {\n  vec4 color = texture2D(tex0, vTexCoord);\n  vec4 color2 = texture2D(tex1, vTexCoord);\n\n  gl_FragColor = color * color2;\n}\n\n#endif";
+
+FXStage.prototype.mult = function (source2, options) {
+  options = options || {};
+  var outputSize = this.getOutputSize(options.width, options.height);
+  var rt = this.getRenderTarget(outputSize.width, outputSize.height, options.depth, options.bpp);
+  rt.bind();
+  this.getSourceTexture().bind(0);
+  this.getSourceTexture(source2).bind(1);
+  var program = this.getShader(MultGLSL);
+  program.use();
+  program.uniforms.tex0(0);
+  program.uniforms.tex1(1);
+  this.drawFullScreenQuad(outputSize.width, outputSize.height, null, program);
+  rt.unbind();
+  return this.asFXStage(rt, 'mult');
+};
+
+module.exports = FXStage;
+},{"./FXStage":191}],193:[function(require,module,exports){
+var FXStage = require('./FXStage');
+
+FXStage.prototype.render = function (options) {
+  var gl = this.gl;
+  var outputSize = this.getOutputSize(options.width, options.height);
+  var rt = this.getRenderTarget(outputSize.width, outputSize.height, options.depth, options.bpp);
+  var oldViewport = gl.getParameter(gl.VIEWPORT);
+  gl.viewport(0, 0, outputSize.width, outputSize.height);
+  rt.bindAndClear();
+  if (options.drawFunc) {
+    options.drawFunc();
+  }
+  rt.unbind();
+  gl.viewport(oldViewport[0], oldViewport[1], oldViewport[2], oldViewport[3]);
+  return this.asFXStage(rt, 'render');
+};
+
+},{"./FXStage":191}],194:[function(require,module,exports){
+var FXStage = require('./FXStage');
+var geom = require('pex-geom');
+var glu = require('pex-glu')
+var Vec2 = geom.Vec2;
+
+
+var SSAOGLSL = "//based on http://blenderartists.org/forum/showthread.php?184102-nicer-and-faster-SSAO and http://www.pasteall.org/12299\n#ifdef VERT\n\nattribute vec2 position;\nattribute vec2 texCoord;\n\nvarying vec2 vTexCoord;\n\nvoid main() {\n  gl_Position = vec4(position, 0.0, 1.0);\n  vTexCoord = texCoord;\n}\n\n#endif\n\n#ifdef FRAG\n\n#define PI    3.14159265\n\nvarying vec2 vTexCoord;\n\nuniform sampler2D depthMap;\nuniform vec2 textureSize;\nuniform float near;\nuniform float far;\n\nconst int samples = 3;\nconst int rings = 5;\n\nuniform float strength;\nuniform float offset;\n\nvec2 rand(vec2 coord) {\n  float noiseX = (fract(sin(dot(coord, vec2(12.9898,78.233))) * 43758.5453));\n  float noiseY = (fract(sin(dot(coord, vec2(12.9898,78.233) * 2.0)) * 43758.5453));\n  return vec2(noiseX,noiseY) * 0.004;\n}\n\nfloat compareDepths( in float depth1, in float depth2 )\n{\n  float depthTolerance = far / 5.0;\n  float occlusionTolerance = far / 100.0;\n  float diff = (depth1 - depth2);\n\n  if (diff <= 0.0) return 0.0;\n  if (diff > depthTolerance) return 0.0;\n  if (diff < occlusionTolerance) return 0.0;\n\n  return 1.0;\n}\n\n//fron depth buf normalized z to linear (eye space) z\n//http://stackoverflow.com/questions/6652253/getting-the-true-z-value-from-the-depth-buffer\nfloat readDepth(vec2 coord) {\n  float z_b = texture2D(depthMap, coord).r;\n  float z_n = 2.0 * z_b - 1.0;\n  float z_e = 2.0 * near * far / (far + near - z_n * (far - near));\n  return z_e;\n}\n\nvoid main() {\n  vec2 texCoord = vec2(gl_FragCoord.x / textureSize.x, gl_FragCoord.y / textureSize.y);\n  float depth = readDepth(texCoord);\n  float z_b = texture2D(depthMap, texCoord).r;\n\n  float d;\n\n  float aspect = textureSize.x / textureSize.y;\n  vec2 noise = rand(vTexCoord);\n\n  float w = (1.0 / textureSize.x)/clamp(z_b,0.1,1.0)+(noise.x*(1.0-noise.x));\n  float h = (1.0 / textureSize.y)/clamp(z_b,0.1,1.0)+(noise.y*(1.0-noise.y));\n\n  float pw;\n  float ph;\n\n  float ao = 0.0;\n  float s = 0.0;\n  float fade = 4.0;\n\n  for (int i = 0 ; i < rings; i += 1)\n  {\n    fade *= 0.5;\n    for (int j = 0 ; j < samples*rings; j += 1)\n    {\n      if (j >= samples*i) break;\n      float step = PI * 2.0 / (float(samples) * float(i));\n      float r = 4.0 * float(i);\n      pw = r * (cos(float(j)*step));\n      ph = r * (sin(float(j)*step)) * aspect;\n      d = readDepth( vec2(texCoord.s + pw * w,texCoord.t + ph * h));\n      ao += compareDepths(depth, d) * fade;\n      s += 1.0 * fade;\n    }\n  }\n\n  ao /= s;\n  ao = clamp(ao, 0.0, 1.0);\n  ao = 1.0 - ao;\n  ao = offset + (1.0 - offset) * ao;\n  ao = pow(ao, strength);\n\n  gl_FragColor = vec4(ao, ao, ao, 1.0);\n}\n\n#endif";
+
+FXStage.prototype.ssao = function (options) {
+  options = options || {};
+  var outputSize = this.getOutputSize(options.width, options.height);
+  var rt = this.getRenderTarget(outputSize.width, outputSize.height, options.depth, options.bpp);
+  rt.bind();
+  var depthMap = this.getSourceTexture(options.depthMap);
+  depthMap.bind(0);
+  var program = this.getShader(SSAOGLSL);
+  program.use();
+  program.uniforms.textureSize(Vec2.create(outputSize.width, outputSize.height));
+  program.uniforms.depthMap(0);
+  program.uniforms.near(options.camera.getNear());
+  program.uniforms.far(options.camera.getFar());
+  if (program.uniforms.strength) program.uniforms.strength(typeof(options.strength) !== "undefined" ? options.strength : 1);
+  if (program.uniforms.offset) program.uniforms.offset(typeof(options.offset) !== "undefined" ? options.offset : 0);
+  this.drawFullScreenQuad(outputSize.width, outputSize.height, null, program);
+  rt.unbind();
+  return this.asFXStage(rt, 'ssao');
+};
+
+module.exports = FXStage;
+},{"./FXStage":191,"pex-geom":212,"pex-glu":230}],195:[function(require,module,exports){
+var geom  = require('pex-geom');
+var glu  = require('pex-glu');
+var FXStage = require('./FXStage');
+
+
+var SaveGLSL = "#ifdef VERT\n\nattribute vec2 position;\nattribute vec2 texCoord;\nvarying vec2 vTexCoord;\n\nvoid main() {\n  gl_Position = vec4(position, 0.0, 1.0);\n  vTexCoord = texCoord;\n}\n\n#endif\n\n#ifdef FRAG\n\nvarying vec2 vTexCoord;\nuniform sampler2D tex0;\n\nvoid main() {\n  gl_FragColor = texture2D(tex0, vTexCoord);\n}\n\n#endif";
+
+var pad = function(num, char, len) {
+  var s = '' + num;
+  while (s.length < len) {
+    s = char + s;
+  }
+  return s;
+}
+
+FXStage.prototype.save = function (path, options) {
+  path = path || '.'
+  options = options || {};
+
+  var outputSize = this.getOutputSize(options.width, options.height);
+  var rt = this.getRenderTarget(outputSize.width, outputSize.height, options.depth, options.bpp);
+  rt.bind();
+  this.getSourceTexture().bind(0);
+  var program = this.getShader(SaveGLSL);
+  program.use();
+  program.uniforms.tex0(0);
+
+  var oldViewport = this.gl.getParameter(this.gl.VIEWPORT);
+  glu.viewport(0, 0, outputSize.width, outputSize.height, false);
+
+  this.drawFullScreenQuad(outputSize.width, outputSize.height, null, program);
+
+  var d = new Date();
+  var filename = path + "/screenshot_"
+  filename += d.getFullYear() + '-' + pad(d.getMonth()+1,'0',2) + '-' + pad(d.getDate(),'0',2);
+  filename += '_' + pad(d.getHours(),'0',2) + ':' + pad(d.getMinutes(),'0',2) + ':' + pad(d.getSeconds(),'0',2) + '.png'
+  this.gl.writeImage('png', filename);
+  console.log('Saved', filename);
+
+  glu.viewport(oldViewport[0], oldViewport[1], oldViewport[2], oldViewport[3], false);
+
+  rt.unbind();
+
+  return this.asFXStage(rt, 'save');
+};
+
+module.exports = FXStage;
+},{"./FXStage":191,"pex-geom":212,"pex-glu":230}],196:[function(require,module,exports){
+var FXStage = require('./FXStage');
+
+
+var TonemapReinhardGLSL = "#ifdef VERT\n\nattribute vec2 position;\nattribute vec2 texCoord;\nvarying vec2 vTexCoord;\n\nvoid main() {\n  gl_Position = vec4(position, 0.0, 1.0);\n  vTexCoord = texCoord;\n}\n\n#endif\n\n#ifdef FRAG\n\nvarying vec2 vTexCoord;\nuniform float exposure;\nuniform sampler2D tex0;\n\nvoid main() {\n  vec4 color = texture2D(tex0, vTexCoord).rgba;\n  color.rgb *= exposure;\n  color = color/(1.0 + color);\n  vec3 retColor = color.rgb;\n  gl_FragColor.rgb = retColor;\n  gl_FragColor.a = color.a;\n}\n\n#endif";
+
+FXStage.prototype.tonemapReinhard = function (options) {
+  options = options || {
+    exposure: 1
+  };
+  var outputSize = this.getOutputSize(options.width, options.height);
+  var rt = this.getRenderTarget(outputSize.width, outputSize.height, options.depth, options.bpp);
+  rt.bind();
+  this.getSourceTexture().bind(0);
+  var program = this.getShader(TonemapReinhardGLSL);
+  program.use();
+  program.uniforms.tex0(0);
+  program.uniforms.exposure(options.exposure);
+  this.drawFullScreenQuad(outputSize.width, outputSize.height, null, program);
+
+  rt.unbind();
+  return this.asFXStage(rt, 'tonemapReinhard');
+};
+
+module.exports = FXStage;
+},{"./FXStage":191}],197:[function(require,module,exports){
 module.exports.Plane = require('./lib/Plane');
 module.exports.Cube = require('./lib/Cube');
 module.exports.Box = require('./lib/Box');
@@ -19401,7 +20071,7 @@ module.exports.LineBuilder = require('./lib/LineBuilder');
 module.exports.Loft = require('./lib/Loft');
 module.exports.IsoSurface = require('./lib/IsoSurface');
 module.exports.Cylinder = require('./lib/Cylinder');
-},{"./lib/Box":181,"./lib/Cube":182,"./lib/Cylinder":183,"./lib/Dodecahedron":184,"./lib/HexSphere":185,"./lib/Icosahedron":186,"./lib/IsoSurface":187,"./lib/LineBuilder":188,"./lib/Loft":189,"./lib/Octahedron":190,"./lib/Plane":191,"./lib/Sphere":192,"./lib/Tetrahedron":193}],181:[function(require,module,exports){
+},{"./lib/Box":198,"./lib/Cube":199,"./lib/Cylinder":200,"./lib/Dodecahedron":201,"./lib/HexSphere":202,"./lib/Icosahedron":203,"./lib/IsoSurface":204,"./lib/LineBuilder":205,"./lib/Loft":206,"./lib/Octahedron":207,"./lib/Plane":208,"./lib/Sphere":209,"./lib/Tetrahedron":210}],198:[function(require,module,exports){
 //Like cube but not subdivided and continuous on edges
 
 //## Parent class : [geom.Geometry](../pex-geom/Geometry.html)
@@ -19466,7 +20136,7 @@ Box.prototype = Object.create(Geometry.prototype);
 
 module.exports = Box;
 
-},{"pex-geom":195}],182:[function(require,module,exports){
+},{"pex-geom":212}],199:[function(require,module,exports){
 //Cube geometry generator.
 
 //## Parent class : [geom.Geometry](../pex-geom/Geometry.html)
@@ -19554,7 +20224,7 @@ Cube.prototype = Object.create(Geometry.prototype);
 
 module.exports = Cube;
 
-},{"pex-geom":195}],183:[function(require,module,exports){
+},{"pex-geom":212}],200:[function(require,module,exports){
 //Cylinder geometry generator.
 
 //## Parent class : [geom.Geometry](../pex-geom/Geometry.html)
@@ -19664,7 +20334,7 @@ Cylinder.prototype = Object.create(Geometry.prototype);
 
 module.exports = Cylinder;
 
-},{"pex-geom":195}],184:[function(require,module,exports){
+},{"pex-geom":212}],201:[function(require,module,exports){
 //Dodecahedron geometry generator.
 //Based on http://paulbourke.net/geometry/platonic/
 
@@ -19769,7 +20439,7 @@ function Dodecahedron(r) {
 Dodecahedron.prototype = Object.create(Geometry.prototype);
 
 module.exports = Dodecahedron;
-},{"pex-geom":195}],185:[function(require,module,exports){
+},{"pex-geom":212}],202:[function(require,module,exports){
 //HexSphere geometry generator.
 
 //## Parent class : [geom.Geometry](../pex-geom/Geometry.html)
@@ -19869,7 +20539,7 @@ function centroid(points) {
 function elements(list, indices) {
   return indices.map(function(i) { return list[i]; })
 }
-},{"./Icosahedron":186,"pex-geom":195}],186:[function(require,module,exports){
+},{"./Icosahedron":203,"pex-geom":212}],203:[function(require,module,exports){
 //Icosahedron geometry generator.
 //Based on http://paulbourke.net/geometry/platonic/
 
@@ -19971,7 +20641,7 @@ function Icosahedron(r) {
 Icosahedron.prototype = Object.create(Geometry.prototype);
 
 module.exports = Icosahedron;
-},{"pex-geom":195}],187:[function(require,module,exports){
+},{"pex-geom":212}],204:[function(require,module,exports){
 //Marching Cubes implementation
 
 //## Parent class : [Geometry](../pex-geom/Geometry.html)
@@ -20479,7 +21149,7 @@ var TriangleConnectionTable = [
 ];
 
 module.exports = IsoSurface;
-},{"pex-geom":195}],188:[function(require,module,exports){
+},{"pex-geom":212}],205:[function(require,module,exports){
 //Line based geometry generator useful for debugging.
 
 //## Parent class : [Geometry](../pex-geom/Geometry.html)
@@ -20588,7 +21258,7 @@ LineBuilder.prototype.reset = function() {
 
 module.exports = LineBuilder;
 
-},{"pex-geom":195}],189:[function(require,module,exports){
+},{"pex-geom":212}],206:[function(require,module,exports){
 //Loft geometry generator.  
 //Extruded 2d shape along a 3d curve.  
 
@@ -20876,7 +21546,7 @@ function clamp(value, min, max) {
 
 module.exports = Loft;
 
-},{"./LineBuilder":188,"merge":194,"pex-geom":195}],190:[function(require,module,exports){
+},{"./LineBuilder":205,"merge":211,"pex-geom":212}],207:[function(require,module,exports){
 //Octahedron geometry generator.
 //Based on http://paulbourke.net/geometry/platonic/
 
@@ -20944,7 +21614,7 @@ function Octahedron(r) {
 Octahedron.prototype = Object.create(Geometry.prototype);
 
 module.exports = Octahedron;
-},{"pex-geom":195}],191:[function(require,module,exports){
+},{"pex-geom":212}],208:[function(require,module,exports){
 //Plane geometry generator.
 
 //## Parent class : [Geometry](../pex-geom/Geometry.html)
@@ -21037,7 +21707,7 @@ function Plane(su, sv, nu, nv, u, v) {
 Plane.prototype = Object.create(Geometry.prototype);
 
 module.exports = Plane;
-},{"pex-geom":195}],192:[function(require,module,exports){
+},{"pex-geom":212}],209:[function(require,module,exports){
 //Sphere geometry generator.
 
 //## Parent class : [Geometry](../pex-geom/Geometry.html)
@@ -21127,7 +21797,7 @@ Sphere.prototype = Object.create(Geometry.prototype);
 
 module.exports = Sphere;
 
-},{"pex-geom":195}],193:[function(require,module,exports){
+},{"pex-geom":212}],210:[function(require,module,exports){
 //Tetrahedron geometry generator.
 //Based on http://mathworld.wolfram.com/RegularTetrahedron.html
 
@@ -21180,7 +21850,7 @@ function Tetrahedron(r) {
 Tetrahedron.prototype = Object.create(Geometry.prototype);
 
 module.exports = Tetrahedron;
-},{"pex-geom":195}],194:[function(require,module,exports){
+},{"pex-geom":212}],211:[function(require,module,exports){
 /*!
  * @name JavaScript/NodeJS Merge v1.1.3
  * @author yeikos
@@ -21262,7 +21932,7 @@ module.exports = Tetrahedron;
 	}
 
 })(typeof module === 'object' && module && typeof module.exports === 'object' && module.exports);
-},{}],195:[function(require,module,exports){
+},{}],212:[function(require,module,exports){
 module.exports.Vec2 = require('./lib/Vec2');
 module.exports.Vec3 = require('./lib/Vec3');
 module.exports.Vec4 = require('./lib/Vec4');
@@ -21280,7 +21950,7 @@ module.exports.BoundingBox = require('./lib/BoundingBox');
 module.exports.Triangle2D = require('./lib/Triangle2D');
 module.exports.Triangle3D = require('./lib/Triangle3D');
 module.exports.Octree = require('./lib/Octree');
-},{"./lib/BoundingBox":196,"./lib/Geometry":197,"./lib/Mat4":198,"./lib/Octree":199,"./lib/Path":200,"./lib/Plane":201,"./lib/Quat":202,"./lib/Ray":203,"./lib/Rect":204,"./lib/Spline1D":205,"./lib/Spline2D":206,"./lib/Spline3D":207,"./lib/Triangle2D":208,"./lib/Triangle3D":209,"./lib/Vec2":210,"./lib/Vec3":211,"./lib/Vec4":212}],196:[function(require,module,exports){
+},{"./lib/BoundingBox":213,"./lib/Geometry":214,"./lib/Mat4":215,"./lib/Octree":216,"./lib/Path":217,"./lib/Plane":218,"./lib/Quat":219,"./lib/Ray":220,"./lib/Rect":221,"./lib/Spline1D":222,"./lib/Spline2D":223,"./lib/Spline3D":224,"./lib/Triangle2D":225,"./lib/Triangle3D":226,"./lib/Vec2":227,"./lib/Vec3":228,"./lib/Vec4":229}],213:[function(require,module,exports){
 //A bounding box is a box with the smallest possible measure 
 //(area for 2D or volume for 3D) for a given geometry or a set of points
 //
@@ -21376,7 +22046,7 @@ BoundingBox.prototype.contains = function(p) {
 module.exports = BoundingBox;
 
 
-},{"./Vec3":211}],197:[function(require,module,exports){
+},{"./Vec3":228}],214:[function(require,module,exports){
 //A collection of vertices, vertex attributes and faces or edges defining a 3d shape.
 //(area for 2D or volume for 3D) for a given geometry or a set of points
 //
@@ -22432,7 +23102,7 @@ function move(a, b, t) {
 
 module.exports = Geometry;
 
-},{"./BoundingBox":196,"./Ray":203,"./Vec3":211}],198:[function(require,module,exports){
+},{"./BoundingBox":213,"./Ray":220,"./Vec3":228}],215:[function(require,module,exports){
 //A 4 by 4 Matrix
 //## Example use
 //     var mat4 = new Mat4()
@@ -22905,7 +23575,7 @@ Mat4.prototype.fromArray = function(a) {
 module.exports = Mat4;
 
 
-},{"./Vec3":211}],199:[function(require,module,exports){
+},{"./Vec3":228}],216:[function(require,module,exports){
 //3D Three data structure for fast spatial point indexing
 //## Example use
 //      var octree = new Octree(new Vec3(-1,-1,1), new Vec3(2,2,2));
@@ -23207,7 +23877,7 @@ Octree.Cell.prototype.findNearbyPoints = function (p, r, result, options) {
 
 module.exports = Octree;
 
-},{"pex-geom":195}],200:[function(require,module,exports){
+},{"pex-geom":212}],217:[function(require,module,exports){
 //Path of points
 //
 //## Example use
@@ -23372,7 +24042,7 @@ Path.prototype.precalculateLength = function() {
 module.exports = Path;
 
 
-},{"./Vec3":211}],201:[function(require,module,exports){
+},{"./Vec3":228}],218:[function(require,module,exports){
 //A plane represented by a point and a normal vector perpendicular to the plane's surface.
 //
 //Methematical construct not a 3d geometry mesh.
@@ -23469,7 +24139,7 @@ Plane.prototype.updateUV = function() {
 }
 
 module.exports = Plane;
-},{"./Vec2":210,"./Vec3":211}],202:[function(require,module,exports){
+},{"./Vec2":227,"./Vec3":228}],219:[function(require,module,exports){
 //A Quaternion (x, y, z, w)
 //## Example use
 //     var q = new Quat().fromDirection(new Vec3(1, 1, 1));
@@ -23808,7 +24478,7 @@ Quat.fromDirection = function(direction) {
 
 module.exports = Quat;
 
-},{"./Mat4":198,"./Vec3":211}],203:[function(require,module,exports){
+},{"./Mat4":215,"./Vec3":228}],220:[function(require,module,exports){
 //A ray.
 //
 //Consists of the starting point *origin* and the *direction* vector.  
@@ -24030,7 +24700,7 @@ Ray.prototype.hitTestTriangle = function(triangle) {
 
 module.exports = Ray;
 
-},{"./Vec3":211}],204:[function(require,module,exports){
+},{"./Vec3":228}],221:[function(require,module,exports){
 //2D Rect (x, y, width, height) or (min, max)
 //## Example use
 //      var rect = new Rect(new Vec2(-1, -1), new Vec2(1, 1));
@@ -24178,7 +24848,7 @@ Rect.fromPoints = function(points) {
 }
 
 module.exports = Rect;
-},{"pex-geom":195}],205:[function(require,module,exports){
+},{"pex-geom":212}],222:[function(require,module,exports){
 //Camtull-Rom spline implementation  
 //Inspired by code from [Tween.js][1]
 //[1]: http://sole.github.com/tween.js/examples/05_spline.html
@@ -24377,7 +25047,7 @@ Spline1D.prototype.interpolate = function(p0, p1, p2, p3, t) {
 
 module.exports = Spline1D;
 
-},{}],206:[function(require,module,exports){
+},{}],223:[function(require,module,exports){
 //Camtull-Rom spline implementation  
 //Inspired by code from [Tween.js][1]
 //[1]: http://sole.github.com/tween.js/examples/05_spline.html
@@ -24584,7 +25254,7 @@ Spline2D.prototype.interpolate = function (p0, p1, p2, p3, t) {
 };
 
 module.exports = Spline2D;
-},{"./Vec2":210}],207:[function(require,module,exports){
+},{"./Vec2":227}],224:[function(require,module,exports){
 //Camtull-Rom spline implementation  
 //Inspired by code from [Tween.js][1]
 //[1]: http://sole.github.com/tween.js/examples/05_spline.html
@@ -24800,7 +25470,7 @@ Spline3D.prototype.interpolate = function (p0, p1, p2, p3, t) {
 };
 
 module.exports = Spline3D;
-},{"./Vec3":211}],208:[function(require,module,exports){
+},{"./Vec3":228}],225:[function(require,module,exports){
 //2D triangle.
 //
 //Consists of three 2D points: a, b, c
@@ -24850,7 +25520,7 @@ function sign(a, b, c) {
 }
 
 module.exports = Triangle2D;
-},{}],209:[function(require,module,exports){
+},{}],226:[function(require,module,exports){
 //3D triangle.
 //
 //Consists of three 3D points: a, b, c
@@ -24884,7 +25554,7 @@ Triangle3D.prototype.getArea = function() {
 }
 
 module.exports = Triangle3D;
-},{}],210:[function(require,module,exports){
+},{}],227:[function(require,module,exports){
 //2D Vector (x, y)
 //## Example use
 //      var position = new Vec2(0, 0);
@@ -25151,7 +25821,7 @@ Vec2.prototype.hash = function() {
 
 module.exports = Vec2;
 
-},{}],211:[function(require,module,exports){
+},{}],228:[function(require,module,exports){
 //3D Vector (x, y, z)
 //## Example use
 //      var right = new Vec3(0, 1, 0);
@@ -25464,7 +26134,7 @@ Vec3.Zero = new Vec3(0, 0, 0);
 
 module.exports = Vec3;
 
-},{}],212:[function(require,module,exports){
+},{}],229:[function(require,module,exports){
 //4D Vector (x, y, z, w)
 //## Example use
 //      var a = new Vec4(0.2, 0.4, 3.3, 1.0);
@@ -25566,7 +26236,7 @@ Vec4.prototype.hash = function() {
 
 module.exports = Vec4;
 
-},{}],213:[function(require,module,exports){
+},{}],230:[function(require,module,exports){
 module.exports.Context = require('./lib/Context');
 module.exports.Texture = require('./lib/Texture');
 module.exports.Texture2D = require('./lib/Texture2D');
@@ -25587,7 +26257,7 @@ for(var funcName in Utils) {
 }
 
 
-},{"./lib/Arcball":214,"./lib/Context":216,"./lib/Material":217,"./lib/Mesh":218,"./lib/OrthographicCamera":219,"./lib/PerspectiveCamera":220,"./lib/Program":221,"./lib/RenderTarget":222,"./lib/ScreenImage":224,"./lib/Texture":225,"./lib/Texture2D":226,"./lib/TextureCube":227,"./lib/Utils":228}],214:[function(require,module,exports){
+},{"./lib/Arcball":231,"./lib/Context":233,"./lib/Material":234,"./lib/Mesh":235,"./lib/OrthographicCamera":236,"./lib/PerspectiveCamera":237,"./lib/Program":238,"./lib/RenderTarget":239,"./lib/ScreenImage":241,"./lib/Texture":242,"./lib/Texture2D":243,"./lib/TextureCube":244,"./lib/Utils":245}],231:[function(require,module,exports){
 var geom = require('pex-geom');
 var Vec2 = geom.Vec2;
 var Vec3 = geom.Vec3;
@@ -25750,7 +26420,7 @@ Arcball.prototype.setDistance = function(distance) {
 };
 
 module.exports = Arcball;
-},{"pex-geom":195}],215:[function(require,module,exports){
+},{"pex-geom":212}],232:[function(require,module,exports){
 var geom = require('pex-geom');
 var Vec2 = geom.Vec2;
 var Vec3 = geom.Vec3;
@@ -25911,7 +26581,7 @@ Buffer.prototype.update = function(data, usage) {
 
 module.exports = Buffer;
 
-},{"./Context":216,"pex-color":177,"pex-geom":195}],216:[function(require,module,exports){
+},{"./Context":233,"pex-color":177,"pex-geom":212}],233:[function(require,module,exports){
 var sys = require('pex-sys');
 
 var currentGLContext = null;
@@ -25939,7 +26609,7 @@ Object.defineProperty(Context, 'currentContext', {
 });
 
 module.exports = Context;
-},{"pex-sys":255}],217:[function(require,module,exports){
+},{"pex-sys":272}],234:[function(require,module,exports){
 var Context = require('./Context');
 
 function Material(program, uniforms) {
@@ -25968,7 +26638,7 @@ Material.prototype.use = function () {
 };
 
 module.exports = Material;
-},{"./Context":216}],218:[function(require,module,exports){
+},{"./Context":233}],235:[function(require,module,exports){
 var merge = require('merge');
 var geom = require('pex-geom')
 var Context = require('./Context');
@@ -26255,7 +26925,7 @@ Mesh.prototype.updateBoundingBox = function() {
 
 module.exports = Mesh;
 
-},{"./Context":216,"./RenderableGeometry":223,"merge":176,"pex-geom":195}],219:[function(require,module,exports){
+},{"./Context":233,"./RenderableGeometry":240,"merge":176,"pex-geom":212}],236:[function(require,module,exports){
 var geom = require('pex-geom');
 var Vec2 = geom.Vec2;
 var Vec3 = geom.Vec3;
@@ -26406,7 +27076,7 @@ OrthographicCamera.prototype.getWorldRay = function(x, y, windowWidth, windowHei
 
 module.exports = OrthographicCamera;
 
-},{"pex-geom":195}],220:[function(require,module,exports){
+},{"pex-geom":212}],237:[function(require,module,exports){
 var geom = require('pex-geom');
 var Vec2 = geom.Vec2;
 var Vec3 = geom.Vec3;
@@ -26564,7 +27234,7 @@ PerspectiveCamera.prototype.getWorldRay = function(x, y, windowWidth, windowHeig
 
 module.exports = PerspectiveCamera;
 
-},{"pex-geom":195}],221:[function(require,module,exports){
+},{"pex-geom":212}],238:[function(require,module,exports){
 var Context = require('./Context');
 var sys = require('pex-sys');
 var IO = sys.IO;
@@ -26774,7 +27444,7 @@ Program.makeUniformSetter = function(gl, type, location) {
 };
 
 module.exports = Program;
-},{"./Context":216,"pex-sys":255}],222:[function(require,module,exports){
+},{"./Context":233,"pex-sys":272}],239:[function(require,module,exports){
 var Context = require('./Context');
 var Texture2D = require('./Texture2D');
 var merge = require('merge');
@@ -26927,7 +27597,7 @@ RenderTarget.prototype.getDepthAttachement = function() {
 
  module.exports = RenderTarget;
 
-},{"./Context":216,"./Texture2D":226,"merge":176,"pex-sys":255}],223:[function(require,module,exports){
+},{"./Context":233,"./Texture2D":243,"merge":176,"pex-sys":272}],240:[function(require,module,exports){
 var Geometry = require('pex-geom').Geometry;
 var Context = require('./Context');
 var Buffer = require('./Buffer');
@@ -26984,7 +27654,7 @@ var RenderableGeometry = {
 
 module.exports = RenderableGeometry;
 
-},{"./Buffer":215,"./Context":216,"pex-geom":195}],224:[function(require,module,exports){
+},{"./Buffer":232,"./Context":233,"pex-geom":212}],241:[function(require,module,exports){
 var geom = require('pex-geom');
 var Vec2 = geom.Vec2;
 var Geometry = geom.Geometry;
@@ -27089,7 +27759,7 @@ ScreenImage.prototype.draw = function (image, program) {
 };
 
 module.exports = ScreenImage;
-},{"./Material":217,"./Mesh":218,"./Program":221,"pex-geom":195}],225:[function(require,module,exports){
+},{"./Material":234,"./Mesh":235,"./Program":238,"pex-geom":212}],242:[function(require,module,exports){
 var Context = require('./Context');
 
 function Texture(target) {
@@ -27117,7 +27787,7 @@ Texture.prototype.bind = function(unit) {
 };
 
 module.exports = Texture;
-},{"./Context":216}],226:[function(require,module,exports){
+},{"./Context":233}],243:[function(require,module,exports){
 var sys = require('pex-sys');
 var merge = require('merge');
 var IO = sys.IO;
@@ -27335,7 +28005,7 @@ Texture2D.prototype.generateMipmap = function() {
 
 module.exports = Texture2D;
 
-},{"./Context":216,"./Texture":225,"merge":176,"pex-sys":255}],227:[function(require,module,exports){
+},{"./Context":233,"./Texture":242,"merge":176,"pex-sys":272}],244:[function(require,module,exports){
 var sys = require('pex-sys');
 var IO = sys.IO;
 var Platform = sys.Platform;
@@ -27430,7 +28100,7 @@ TextureCube.prototype.dispose = function () {
 
 module.exports = TextureCube;
 
-},{"./Context":216,"./Texture":225,"merge":176,"pex-sys":255}],228:[function(require,module,exports){
+},{"./Context":233,"./Texture":242,"merge":176,"pex-sys":272}],245:[function(require,module,exports){
 var Context = require('./Context');
 
 module.exports.getCurrentContext = function() {
@@ -27556,9 +28226,9 @@ module.exports.lineWidth = function(width) {
   gl.lineWidth(width);
   return this;
 }
-},{"./Context":216}],229:[function(require,module,exports){
+},{"./Context":233}],246:[function(require,module,exports){
 module.exports.GUI = require('./lib/GUI');
-},{"./lib/GUI":230}],230:[function(require,module,exports){
+},{"./lib/GUI":247}],247:[function(require,module,exports){
 var glu = require('pex-glu');
 var geom = require('pex-geom');
 var sys = require('pex-sys');
@@ -28198,7 +28868,7 @@ GUI.prototype.toggleEnabled = function() {
 
 module.exports = GUI;
 
-},{"./GUIControl":231,"./HTMLCanvasRenderer":232,"./SkiaRenderer":233,"pex-color":177,"pex-geom":195,"pex-glu":213,"pex-sys":255}],231:[function(require,module,exports){
+},{"./GUIControl":248,"./HTMLCanvasRenderer":249,"./SkiaRenderer":250,"pex-color":177,"pex-geom":212,"pex-glu":230,"pex-sys":272}],248:[function(require,module,exports){
 function GUIControl(o) {
   for (var i in o) {
     this[i] = o[i];
@@ -28392,7 +29062,7 @@ GUIControl.prototype.getStrValue = function() {
 
 module.exports = GUIControl;
 GUIControl;
-},{}],232:[function(require,module,exports){
+},{}],249:[function(require,module,exports){
 var glu = require('pex-glu');
 var geom = require('pex-geom');
 var plask = require('plask');
@@ -28662,7 +29332,7 @@ HTMLCanvasRenderer.prototype.updateTexture = function () {
 
 module.exports = HTMLCanvasRenderer;
 
-},{"pex-geom":195,"pex-glu":213,"plask":14}],233:[function(require,module,exports){
+},{"pex-geom":212,"pex-glu":230,"plask":14}],250:[function(require,module,exports){
 var glu = require('pex-glu');
 var geom = require('pex-geom');
 var plask = require('plask');
@@ -29002,7 +29672,7 @@ SkiaRenderer.prototype.updateTexture = function() {
 
 module.exports = SkiaRenderer;
 
-},{"pex-geom":195,"pex-glu":213,"plask":14}],234:[function(require,module,exports){
+},{"pex-geom":212,"pex-glu":230,"plask":14}],251:[function(require,module,exports){
 module.exports.SolidColor = require('./lib/SolidColor');
 module.exports.ShowNormals = require('./lib/ShowNormals');
 module.exports.ShowColors = require('./lib/ShowColors');
@@ -29019,7 +29689,7 @@ module.exports.MatCap = require('./lib/MatCap');
 module.exports.Diffuse = require('./lib/Diffuse');
 module.exports.BlinnPhong = require('./lib/BlinnPhong');
 module.exports.ShowDepth = require('./lib/ShowDepth');
-},{"./lib/BlinnPhong":235,"./lib/Diffuse":236,"./lib/FlatToonShading":237,"./lib/MatCap":238,"./lib/ShowColors":239,"./lib/ShowDepth":240,"./lib/ShowNormals":241,"./lib/ShowPosition":242,"./lib/ShowTexCoords":243,"./lib/SkyBox":244,"./lib/SkyBoxEnvMap":245,"./lib/SolidColor":246,"./lib/Textured":247,"./lib/TexturedCubeMap":248,"./lib/TexturedEnvMap":249,"./lib/TexturedTriPlanar":250}],235:[function(require,module,exports){
+},{"./lib/BlinnPhong":252,"./lib/Diffuse":253,"./lib/FlatToonShading":254,"./lib/MatCap":255,"./lib/ShowColors":256,"./lib/ShowDepth":257,"./lib/ShowNormals":258,"./lib/ShowPosition":259,"./lib/ShowTexCoords":260,"./lib/SkyBox":261,"./lib/SkyBoxEnvMap":262,"./lib/SolidColor":263,"./lib/Textured":264,"./lib/TexturedCubeMap":265,"./lib/TexturedEnvMap":266,"./lib/TexturedTriPlanar":267}],252:[function(require,module,exports){
 var glu = require('pex-glu');
 var color = require('pex-color');
 var geom = require('pex-geom');
@@ -29054,7 +29724,7 @@ BlinnPhong.prototype = Object.create(Material.prototype);
 
 module.exports = BlinnPhong;
 
-},{"merge":176,"pex-color":177,"pex-geom":195,"pex-glu":213}],236:[function(require,module,exports){
+},{"merge":176,"pex-color":177,"pex-geom":212,"pex-glu":230}],253:[function(require,module,exports){
 var glu = require('pex-glu');
 var color = require('pex-color');
 var geom = require('pex-geom');
@@ -29085,7 +29755,7 @@ function Diffuse(uniforms) {
 Diffuse.prototype = Object.create(Material.prototype);
 
 module.exports = Diffuse;
-},{"merge":176,"pex-color":177,"pex-geom":195,"pex-glu":213}],237:[function(require,module,exports){
+},{"merge":176,"pex-color":177,"pex-geom":212,"pex-glu":230}],254:[function(require,module,exports){
 var glu = require('pex-glu');
 var color = require('pex-color');
 var geom = require('pex-geom');
@@ -29117,7 +29787,7 @@ function FlatToonShading(uniforms) {
 FlatToonShading.prototype = Object.create(Material.prototype);
 
 module.exports = FlatToonShading;
-},{"merge":176,"pex-color":177,"pex-geom":195,"pex-glu":213}],238:[function(require,module,exports){
+},{"merge":176,"pex-color":177,"pex-geom":212,"pex-glu":230}],255:[function(require,module,exports){
 //http://www.clicktorelease.com/blog/creating-spherical-environment-mapping-shader
 
 var glu = require('pex-glu');
@@ -29143,7 +29813,7 @@ MatCap.prototype = Object.create(Material.prototype);
 
 module.exports = MatCap;
 
-},{"merge":176,"pex-color":177,"pex-glu":213}],239:[function(require,module,exports){
+},{"merge":176,"pex-color":177,"pex-glu":230}],256:[function(require,module,exports){
 var glu = require('pex-glu');
 var color = require('pex-color');
 var Context = glu.Context;
@@ -29166,7 +29836,7 @@ function ShowColors(uniforms) {
 ShowColors.prototype = Object.create(Material.prototype);
 
 module.exports = ShowColors;
-},{"merge":176,"pex-color":177,"pex-glu":213}],240:[function(require,module,exports){
+},{"merge":176,"pex-color":177,"pex-glu":230}],257:[function(require,module,exports){
 var glu = require('pex-glu');
 var color = require('pex-color');
 var geom = require('pex-geom');
@@ -29194,7 +29864,7 @@ function ShowDepth(uniforms) {
 ShowDepth.prototype = Object.create(Material.prototype);
 
 module.exports = ShowDepth;
-},{"merge":176,"pex-color":177,"pex-geom":195,"pex-glu":213}],241:[function(require,module,exports){
+},{"merge":176,"pex-color":177,"pex-geom":212,"pex-glu":230}],258:[function(require,module,exports){
 var glu = require('pex-glu');
 var color = require('pex-color');
 var Context = glu.Context;
@@ -29217,7 +29887,7 @@ function ShowNormals(uniforms) {
 ShowNormals.prototype = Object.create(Material.prototype);
 
 module.exports = ShowNormals;
-},{"merge":176,"pex-color":177,"pex-glu":213}],242:[function(require,module,exports){
+},{"merge":176,"pex-color":177,"pex-glu":230}],259:[function(require,module,exports){
 var glu = require('pex-glu');
 var color = require('pex-color');
 var geom = require('pex-geom');
@@ -29243,7 +29913,7 @@ function ShowPosition(uniforms) {
 ShowPosition.prototype = Object.create(Material.prototype);
 
 module.exports = ShowPosition;
-},{"merge":176,"pex-color":177,"pex-geom":195,"pex-glu":213}],243:[function(require,module,exports){
+},{"merge":176,"pex-color":177,"pex-geom":212,"pex-glu":230}],260:[function(require,module,exports){
 var glu = require('pex-glu');
 var color = require('pex-color');
 var geom = require('pex-geom');
@@ -29269,7 +29939,7 @@ function ShowTexCoords(uniforms) {
 ShowTexCoords.prototype = Object.create(Material.prototype);
 
 module.exports = ShowTexCoords;
-},{"merge":176,"pex-color":177,"pex-geom":195,"pex-glu":213}],244:[function(require,module,exports){
+},{"merge":176,"pex-color":177,"pex-geom":212,"pex-glu":230}],261:[function(require,module,exports){
 var glu = require('pex-glu');
 var color = require('pex-color');
 var Context = glu.Context;
@@ -29293,7 +29963,7 @@ SkyBox.prototype = Object.create(Material.prototype);
 
 module.exports = SkyBox;
 
-},{"merge":176,"pex-color":177,"pex-glu":213}],245:[function(require,module,exports){
+},{"merge":176,"pex-color":177,"pex-glu":230}],262:[function(require,module,exports){
 var glu = require('pex-glu');
 var color = require('pex-color');
 var Context = glu.Context;
@@ -29317,7 +29987,7 @@ SkyBoxEnvMap.prototype = Object.create(Material.prototype);
 
 module.exports = SkyBoxEnvMap;
 
-},{"merge":176,"pex-color":177,"pex-glu":213}],246:[function(require,module,exports){
+},{"merge":176,"pex-color":177,"pex-glu":230}],263:[function(require,module,exports){
 var glu = require('pex-glu');
 var color = require('pex-color');
 var Context = glu.Context;
@@ -29344,7 +30014,7 @@ function SolidColor(uniforms) {
 SolidColor.prototype = Object.create(Material.prototype);
 
 module.exports = SolidColor;
-},{"merge":176,"pex-color":177,"pex-glu":213}],247:[function(require,module,exports){
+},{"merge":176,"pex-color":177,"pex-glu":230}],264:[function(require,module,exports){
 var glu = require('pex-glu');
 var color = require('pex-color');
 var geom = require('pex-geom');
@@ -29374,7 +30044,7 @@ Textured.prototype = Object.create(Material.prototype);
 
 module.exports = Textured;
 
-},{"merge":176,"pex-color":177,"pex-geom":195,"pex-glu":213}],248:[function(require,module,exports){
+},{"merge":176,"pex-color":177,"pex-geom":212,"pex-glu":230}],265:[function(require,module,exports){
 var glu = require('pex-glu');
 var color = require('pex-color');
 var sys = require('pex-sys');
@@ -29413,7 +30083,7 @@ TexturedCubeMap.prototype = Object.create(Material.prototype);
 
 module.exports = TexturedCubeMap;
 
-},{"merge":176,"pex-color":177,"pex-glu":213,"pex-sys":255}],249:[function(require,module,exports){
+},{"merge":176,"pex-color":177,"pex-glu":230,"pex-sys":272}],266:[function(require,module,exports){
 var glu = require('pex-glu');
 var color = require('pex-color');
 var Context = glu.Context;
@@ -29437,7 +30107,7 @@ TexturedEnvMap.prototype = Object.create(Material.prototype);
 
 module.exports = TexturedEnvMap;
 
-},{"merge":176,"pex-color":177,"pex-glu":213}],250:[function(require,module,exports){
+},{"merge":176,"pex-color":177,"pex-glu":230}],267:[function(require,module,exports){
 var glu = require('pex-glu');
 var color = require('pex-color');
 var geom = require('pex-geom');
@@ -29465,9 +30135,9 @@ TexturedTriPlanar.prototype = Object.create(Material.prototype);
 
 module.exports = TexturedTriPlanar;
 
-},{"merge":176,"pex-color":177,"pex-geom":195,"pex-glu":213}],251:[function(require,module,exports){
+},{"merge":176,"pex-color":177,"pex-geom":212,"pex-glu":230}],268:[function(require,module,exports){
 module.exports = require('./lib/Random');
-},{"./lib/Random":252}],252:[function(require,module,exports){
+},{"./lib/Random":269}],269:[function(require,module,exports){
 var seedrandom = require('seedrandom');
 var geom = require('pex-geom');
 var SimplexNoise = require('simplex-noise');
@@ -29560,7 +30230,7 @@ Random.noise4 = function(x, y, z, w) {
 };
 
 module.exports = Random;
-},{"pex-geom":195,"seedrandom":253,"simplex-noise":254}],253:[function(require,module,exports){
+},{"pex-geom":212,"seedrandom":270,"simplex-noise":271}],270:[function(require,module,exports){
 /**
 
 seedrandom.js
@@ -30004,7 +30674,7 @@ if (module && module.exports) {
   'random'// rngname: name for Math.random and Math.seedrandom
 );
 
-},{"crypto":19}],254:[function(require,module,exports){
+},{"crypto":19}],271:[function(require,module,exports){
 /*
  * A fast javascript implementation of simplex noise by Jonas Wagner
  *
@@ -30412,13 +31082,13 @@ if (typeof module !== 'undefined') {
 
 })();
 
-},{}],255:[function(require,module,exports){
+},{}],272:[function(require,module,exports){
 module.exports.Platform = require('./lib/Platform');
 module.exports.Window = require('./lib/Window');
 module.exports.Time = require('./lib/Time');
 module.exports.IO = require('./lib/IO');
 module.exports.Log = require('./lib/Log');
-},{"./lib/IO":257,"./lib/Log":258,"./lib/Platform":259,"./lib/Time":260,"./lib/Window":261}],256:[function(require,module,exports){
+},{"./lib/IO":274,"./lib/Log":275,"./lib/Platform":276,"./lib/Time":277,"./lib/Window":278}],273:[function(require,module,exports){
 var Platform = require('./Platform');
 var Log = require('./Log');
 var merge = require('merge');
@@ -30766,7 +31436,7 @@ var BrowserWindow = { simpleWindow: simpleWindow };
 
 module.exports = BrowserWindow;
 
-},{"./Log":258,"./Platform":259,"merge":176}],257:[function(require,module,exports){
+},{"./Log":275,"./Platform":276,"merge":176}],274:[function(require,module,exports){
 (function (process){
 var Platform = require('./Platform');
 var Log = require('./Log');
@@ -30904,7 +31574,7 @@ var WebIO = function () {
 if (Platform.isPlask) module.exports = PlaskIO();
 else if (Platform.isBrowser) module.exports = WebIO();
 }).call(this,require('_process'))
-},{"./Log":258,"./Platform":259,"_process":160,"merge":176,"path":159,"plask":14}],258:[function(require,module,exports){
+},{"./Log":275,"./Platform":276,"_process":160,"merge":176,"path":159,"plask":14}],275:[function(require,module,exports){
 function Log() {
 }
 
@@ -30923,7 +31593,7 @@ Log.error = function(msg) {
 };
 
 module.exports = Log;
-},{}],259:[function(require,module,exports){
+},{}],276:[function(require,module,exports){
 (function (process){
 module.exports.isPlask = typeof window === 'undefined' && typeof process === 'object';
 module.exports.isBrowser = typeof window === 'object' && typeof document === 'object';
@@ -30931,7 +31601,7 @@ module.exports.isEjecta = typeof ejecta === 'object' && typeof ejecta.include ==
 module.exports.isiOS = module.exports.isBrowser && typeof navigator === 'object' && /(iPad|iPhone|iPod)/g.test( navigator.userAgent );
 module.exports.isMobile = module.exports.isiOS;
 }).call(this,require('_process'))
-},{"_process":160}],260:[function(require,module,exports){
+},{"_process":160}],277:[function(require,module,exports){
 var Log = require('./Log');
 
 var Time = {
@@ -31015,7 +31685,7 @@ Time.reset = function() {
 }
 
 module.exports = Time;
-},{"./Log":258}],261:[function(require,module,exports){
+},{"./Log":275}],278:[function(require,module,exports){
 var Platform = require('./Platform');
 var BrowserWindow = require('./BrowserWindow');
 var Time = require('./Time');
@@ -31094,9 +31764,9 @@ var Window = {
 
 module.exports = Window;
 
-},{"./BrowserWindow":256,"./Log":258,"./Platform":259,"./Time":260,"merge":176,"plask":14}],262:[function(require,module,exports){
-arguments[4][216][0].apply(exports,arguments)
-},{"dup":216,"pex-sys":255}],263:[function(require,module,exports){
+},{"./BrowserWindow":273,"./Log":275,"./Platform":276,"./Time":277,"merge":176,"plask":14}],279:[function(require,module,exports){
+arguments[4][233][0].apply(exports,arguments)
+},{"dup":233,"pex-sys":272}],280:[function(require,module,exports){
 var Context = require('./Context');
 
 function Material(program, uniforms) {
@@ -31153,4 +31823,4 @@ Material.prototype.use = function () {
 
 module.exports = Material;
 
-},{"./Context":262}]},{},[1]);
+},{"./Context":279}]},{},[1]);

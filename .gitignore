@@ -6,3 +6,5 @@ node_modules
 Session.vim
 .netrwhist
 *~
+.tern-port
+main.web.js

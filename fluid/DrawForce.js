@@ -42,8 +42,8 @@ DrawForce.prototype.applyForce = function (normalizedPos) {
   absPos.y *= this.height;
   var absRadius = this.radius * this.width;
 
-  if (this.isTemporary && !this.forceApplied) // && allow for multiple temporal forces
-			this.clear();
+  // && allow for multiple temporal forces
+  if (this.isTemporary && !this.forceApplied) this.clear();
 
   var typeForce = this.force.clone();
   if (this.type === 'velocity') {

@@ -23,19 +23,21 @@ var Texture2D = glu.Texture2D;
 var Vec2 = geom.Vec2;
 var Vec3 = geom.Vec3;
 var Vec4 = geom.Vec4;
+var Mat4 = geom.Mat4;
 var DisplacedMatCap = require('./materials/DisplacedMatCap');
 var Fluid = require('./fluid/fluid');
 var DrawForce = require('./fluid/DrawForce');
 var ScreenImage = glu.ScreenImage;
 var Geometry = geom.Geometry;
+var Ray = geom.Ray;
 
-var TileRender = require('./TileRender');
+//var TileRender = require('./TileRender');
 var DPI = 1;
 
 sys.Window.create({
   settings: {
-    width: 1600 * DPI,
-    height: 1000 * DPI,
+    width: 1200 * DPI,
+    height: 800 * DPI,
     type: '3d',
     fullscreen: Platform.isBrowser ? true : false,
     highdpi: DPI
@@ -55,11 +57,16 @@ sys.Window.create({
   dripChance:           300,
   backgroundColour:     Color.fromHSL(0.58, 0.97, 0.07),
   wireframeColour:      Color.fromHSL(0.58, 0.97, 0.47),
-
+  userCam:              {
+    position: new Vec3(0, 0, 0),
+    viewMatrix: Mat4.create(),
+    projectionMatrix: Mat4.create()
+  },
 
   init: function() {
-    var planeSize = 4;
-    var numSteps = 500;
+    this.planeSize = 10;
+    var planeSize = this.planeSize;
+    var numSteps = 600;
     var plane = new Plane(planeSize, planeSize, numSteps, numSteps, 'x', 'y');
     var texCoords = [];
     var vertices = [];
@@ -94,7 +101,7 @@ sys.Window.create({
       displacementHeight: this.displacementHeight,
       textureSize:        new Vec2(2100, 2100),
       planeSize:          new Vec2(planeSize, planeSize),
-      numSteps:           numSteps,
+      numSteps:           numSteps
     }));
 
 
@@ -203,19 +210,6 @@ sys.Window.create({
         }
 
         this.fluidTexture = this.fluid.iterate();
-        //
-       // var root = fx();
-       // var scene = root.render({
-       //   width: this.width, height: this.height,
-       //   drawFunc: function() {
-       //     var fbo = new RenderTarget();
-       //   },
-       //   depth: true
-       // });
-
-       // var scene = scene.blur().blur();
-       // scene.blit({x:0, y:0, width:this.width, height: this.height});
-        //
         this.drawScene(this.camera);
       }
 
@@ -239,9 +233,6 @@ sys.Window.create({
       .blur5({ bpp: 32 })
       .blur5({ bpp: 32 })
       .blur5({ bpp: 32 })
-      .blur5({ bpp: 32 })
-      .blur5({ bpp: 32 })
-      .blur5({ bpp: 32 })
       .getSourceTexture();
 
     this.screenImage.setImage(this.blurredFluidTexture);
@@ -261,7 +252,8 @@ sys.Window.create({
     this.mesh.material.uniforms.
       zTreshold           = this.zTreshold;
 
-    this.mesh.material.uniforms.textureSize = new Vec2(this.blurredFluidTexture.width, this.blurredFluidTexture.height)
+    this.mesh.material.uniforms.textureSize = new Vec2(this.blurredFluidTexture.width,
+                                                       this.blurredFluidTexture.height)
     this.mesh.material.uniforms.
       displacementMap     = this.blurredFluidTexture;
 
@@ -285,16 +277,18 @@ sys.Window.create({
     this.fluidTexture.bind();
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
 
-
     glu.enableDepthReadAndWrite(true, true);
     //glu.enableAdditiveBlending(true);
-    //glu.enableAlphaBlending();
+    glu.enableAlphaBlending();
     if (this.drawMetal) this.mesh.draw(camera);
 
     //glu.clearDepth();
 
     if (this.wireframe) this.meshWireframe.draw(camera);
     //this.camera.setPosition(new Vec3(0.128, -1.316, 1.533));
+    //position
+    //view matrix
+    //projection matrix
   },
 
   drip: function() {
@@ -385,53 +379,73 @@ sys.Window.create({
 
 
     this.gui.addHeader('Dripping')
-      .setPosition(1100, 10)
-      this.gui.addParam('Dripping', this, 'dripping')
-      this.gui.addParam('Drip chance', this, 'dripChance', {min: 1, max: 500})
-      this.gui.addParam('DD Density Strength',
-          this.drawDensityForceAuto, 'strength',{min: 0, max: 5})
-      this.gui.addParam('DD Density Radius',
-          this.drawDensityForceAuto, 'radius',{min: 0, max: 0.1})
-      this.gui.addParam('DD Density Edge',
-          this.drawDensityForceAuto, 'edge',{min: 0, max: 1})
-      this.gui.addParam('DV Velocity Strength',
-          this.drawVelocityForceAuto, 'strength',{min: 0, max: 5})
-      this.gui.addParam('DV Velocity Radius',
-          this.drawVelocityForceAuto, 'radius',{min: 0, max: 0.1})
-      this.gui.addParam('DV Velocity Edge',
-          this.drawVelocityForceAuto, 'edge',{min: 0, max: 1})
+      .setPosition(1100, 10);
+    this.gui.addParam('Dripping', this, 'dripping');
+    this.gui.addParam('Drip chance', this, 'dripChance', {min: 1, max: 500});
+    this.gui.addParam('DD Density Strength',
+        this.drawDensityForceAuto, 'strength',{min: 0, max: 5});
+    this.gui.addParam('DD Density Radius',
+        this.drawDensityForceAuto, 'radius',{min: 0, max: 0.1});
+    this.gui.addParam('DD Density Edge',
+        this.drawDensityForceAuto, 'edge',{min: 0, max: 1});
+    this.gui.addParam('DV Velocity Strength',
+        this.drawVelocityForceAuto, 'strength',{min: 0, max: 5});
+    this.gui.addParam('DV Velocity Radius',
+        this.drawVelocityForceAuto, 'radius',{min: 0, max: 0.1});
+    this.gui.addParam('DV Velocity Edge',
+        this.drawVelocityForceAuto, 'edge',{min: 0, max: 1});
 
-      this.on('keyDown', function(e) {
-        if (e.str == 'w') {
-          this.wireframe = !this.wireframe;
-          this.gui.items[0].dirty = true;
-        }
-        if (e.str == 'm') {
-          this.drawMetal = !this.drawMetal;
-          this.gui.items[0].dirty = true;
-        }
-        if (e.str == 'f') {
-          this.drawFluid = !this.drawFluid;
-          this.gui.items[0].dirty = true;
-        }
-        if (e.str == 'n') {
-          this.showNormals = !this.showNormals;
-          this.gui.items[0].dirty = true;
-        }
-        if (e.str == ' ') {
-          this.frame = 0;
-          this.needsRender = true;
-        }
-        if (e.str == 'a') {
-          this.arcball.enabled = !this.arcball.enabled;
-          this.gui.items[0].dirty = true;
-        }
-        switch(e.str) {
-          case 'g': this.gui.toggleEnabled();
-          case 'S': this.gui.save('client.gui.settings.txt'); break;
-          case 'L': this.gui.load('client.gui.settings.txt'); break;
-        }
-      }.bind(this));
+    this.gui.addHeader('Camera');
+    this.gui.addParam('Camera Pos', this.userCam, 'position');
+    this.gui.addParam('Camera view', this.userCam, 'viewMatrix');
+    this.gui.addParam('Camera proj', this.userCam, 'projectionMatrix');
+
+    this.on('keyDown', function(e) {
+      if (e.str == 'w') {
+        this.wireframe = !this.wireframe;
+        this.gui.items[0].dirty = true;
+      }
+      if (e.str == 'm') {
+        this.drawMetal = !this.drawMetal;
+        this.gui.items[0].dirty = true;
+      }
+      if (e.str == 'f') {
+        this.drawFluid = !this.drawFluid;
+        this.gui.items[0].dirty = true;
+      }
+      if (e.str == 'n') {
+        this.showNormals = !this.showNormals;
+        this.gui.items[0].dirty = true;
+      }
+      if (e.str == ' ') {
+        this.frame = 0;
+        this.needsRender = true;
+      }
+      if (e.str == 'a') {
+        this.arcball.enabled = !this.arcball.enabled;
+        this.gui.items[0].dirty = true;
+      }
+
+      if (e.str == 'c') {
+        this.camera.position = this.userCam.position;
+        this.arcball.position = this.userCam.position;
+        this.camera.viewMatrix = this.userCam.viewMatrix;
+        this.camera.projectionMatrix = this.userCam.projectionMatrix;
+        this.camera.updateMatrices();
+      }
+
+      if (e.str == 'C') {
+        this.userCam.position = this.camera.position;
+        this.userCam.viewMatrix = this.camera.viewMatrix;
+        this.userCam.projectionMatrix = this.camera.projectionMatrix;
+      }
+
+      switch(e.str) {
+        case 'g': this.gui.toggleEnabled();
+        case 'S': this.gui.save('client.gui.settings.txt'); break;
+        case 'L': this.gui.load('client.gui.settings.txt'); break;
+      }
+    }.bind(this));
 
     this.gui.load('client.gui.settings.txt');
   },
@@ -472,8 +486,16 @@ sys.Window.create({
       if (!this.drawWithMouse) return;
       var mouse = new Vec2();
 
-      mouse.x = e.x / this.width;
-      mouse.y = (this.height - e.y) / this.height;
+      var worldRay = this.camera.getWorldRay(e.x, e.y, this.width, this.height);
+      var planeCenter = new Vec3(0, 0, 0);
+      var planeNormal = new Vec3(0, 0, 1);
+      var hits = worldRay.hitTestPlane(planeCenter, planeNormal);
+      var hit = hits[0];
+
+      if (hit) {
+        mouse.x = ((hit.x + (this.planeSize/2)) / this.planeSize);
+        mouse.y = ((hit.y + (this.planeSize/2)) / this.planeSize);
+      }
 
       var velocity = mouse.dup().sub(this.lastMouse);
       var vec = new Vec3(velocity.x, velocity.y, 0);
@@ -494,5 +516,4 @@ sys.Window.create({
       }
     }.bind(this));
   }
-
 });
