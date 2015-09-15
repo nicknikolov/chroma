@@ -36,8 +36,8 @@ var DPI = 1;
 
 sys.Window.create({
   settings: {
-    width: 1200 * DPI,
-    height: 800 * DPI,
+    width: 1024 * DPI,
+    height: 768 * DPI,
     type: '3d',
     fullscreen: Platform.isBrowser ? true : false,
     highdpi: DPI
@@ -78,7 +78,6 @@ sys.Window.create({
     })
     var planeTri = new Geometry({ vertices: vertices, texCoords: texCoords });
     var planeWF = new Geometry({ vertices: vertices, texCoords: texCoords });
-    //var planeWF = new Plane(planeSize, planeSize, numSteps, numSteps, 'x', 'y');
     var simWidth = this.width/4;
     var simHeight = this.height/4;
     this.zTreshold = 0.01;
@@ -99,7 +98,7 @@ sys.Window.create({
       tint:               Color.Black,
       zTreshold:          this.zTreshold,
       displacementHeight: this.displacementHeight,
-      textureSize:        new Vec2(2100, 2100),
+      textureSize:        new Vec2(2100, 2100),
       planeSize:          new Vec2(planeSize, planeSize),
       numSteps:           numSteps
     }));
@@ -116,7 +115,7 @@ sys.Window.create({
     }), { lines: true });
 
 
-    this.camera = new PerspectiveCamera(70, this.width / this.height, 0.1, 10);
+    this.camera = new PerspectiveCamera(110, this.width / this.height, 0.1, 10);
 
     this.drawVelocityForceAuto = new DrawForce({
       width:  this.width
@@ -325,6 +324,7 @@ sys.Window.create({
 
   setupGui: function () {
     this.gui = new GUI(this);
+    this.gui.toggleEnabled();
 
     this.gui.addHeader('Drawing options');
     this.gui.addParam('Wireframe \'w\'', this, 'wireframe');
@@ -363,7 +363,7 @@ sys.Window.create({
           }));
 
     this.gui.addHeader('Mouse options')
-      .setPosition(180, 10);
+      .setPosition(this.width - 380, 10);
     this.gui.addParam('MD Density Strength',
         this.drawDensityForce, 'strength',{min: 0, max:5});
     this.gui.addParam('MD Density Radius',
@@ -378,27 +378,22 @@ sys.Window.create({
         this.drawVelocityForce, 'edge',{min: 0, max:1});
 
 
-    this.gui.addHeader('Dripping')
-      .setPosition(1100, 10);
-    this.gui.addParam('Dripping', this, 'dripping');
-    this.gui.addParam('Drip chance', this, 'dripChance', {min: 1, max: 500});
-    this.gui.addParam('DD Density Strength',
-        this.drawDensityForceAuto, 'strength',{min: 0, max: 5});
-    this.gui.addParam('DD Density Radius',
-        this.drawDensityForceAuto, 'radius',{min: 0, max: 0.1});
-    this.gui.addParam('DD Density Edge',
-        this.drawDensityForceAuto, 'edge',{min: 0, max: 1});
-    this.gui.addParam('DV Velocity Strength',
-        this.drawVelocityForceAuto, 'strength',{min: 0, max: 5});
-    this.gui.addParam('DV Velocity Radius',
-        this.drawVelocityForceAuto, 'radius',{min: 0, max: 0.1});
-    this.gui.addParam('DV Velocity Edge',
-        this.drawVelocityForceAuto, 'edge',{min: 0, max: 1});
-
-    this.gui.addHeader('Camera');
-    this.gui.addParam('Camera Pos', this.userCam, 'position');
-    this.gui.addParam('Camera view', this.userCam, 'viewMatrix');
-    this.gui.addParam('Camera proj', this.userCam, 'projectionMatrix');
+//    this.gui.addHeader('Dripping')
+//      .setPosition(1100, 10);
+//    this.gui.addParam('Dripping', this, 'dripping');
+//    this.gui.addParam('Drip chance', this, 'dripChance', {min: 1, max: 500});
+//    this.gui.addParam('DD Density Strength',
+//        this.drawDensityForceAuto, 'strength',{min: 0, max: 5});
+//    this.gui.addParam('DD Density Radius',
+//        this.drawDensityForceAuto, 'radius',{min: 0, max: 0.1});
+//    this.gui.addParam('DD Density Edge',
+//        this.drawDensityForceAuto, 'edge',{min: 0, max: 1});
+//    this.gui.addParam('DV Velocity Strength',
+//        this.drawVelocityForceAuto, 'strength',{min: 0, max: 5});
+//    this.gui.addParam('DV Velocity Radius',
+//        this.drawVelocityForceAuto, 'radius',{min: 0, max: 0.1});
+//    this.gui.addParam('DV Velocity Edge',
+//        this.drawVelocityForceAuto, 'edge',{min: 0, max: 1});
 
     this.on('keyDown', function(e) {
       if (e.str == 'w') {
@@ -474,12 +469,12 @@ sys.Window.create({
     this.lastMouse = new Vec2(0, 0);
 
     this.on('mouseMoved', function (e) {
-      if (!this.drawWithMouse) return;
-      var mouse = new Vec2();
-      mouse.x = e.x / this.width;
-      mouse.y = (this.height - e.y) / this.height;
-      this.lastMouse.x = mouse.x;
-      this.lastMouse.y = mouse.y;
+      //if (!this.drawWithMouse) return;
+      //var mouse = new Vec2();
+      //mouse.x = e.x / this.width;
+      //mouse.y = (this.height - e.y) / this.height;
+      //this.lastMouse.x = mouse.x;
+      //this.lastMouse.y = mouse.y;
     }.bind(this));
 
     this.on('mouseDragged', function(e) {

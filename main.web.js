@@ -37,8 +37,8 @@ var DPI = 1;
 
 sys.Window.create({
   settings: {
-    width: 1200 * DPI,
-    height: 800 * DPI,
+    width: 1024 * DPI,
+    height: 768 * DPI,
     type: '3d',
     fullscreen: Platform.isBrowser ? true : false,
     highdpi: DPI
@@ -65,7 +65,8 @@ sys.Window.create({
   },
 
   init: function() {
-    var planeSize = 10;
+    this.planeSize = 10;
+    var planeSize = this.planeSize;
     var numSteps = 600;
     var plane = new Plane(planeSize, planeSize, numSteps, numSteps, 'x', 'y');
     var texCoords = [];
@@ -78,7 +79,6 @@ sys.Window.create({
     })
     var planeTri = new Geometry({ vertices: vertices, texCoords: texCoords });
     var planeWF = new Geometry({ vertices: vertices, texCoords: texCoords });
-    //var planeWF = new Plane(planeSize, planeSize, numSteps, numSteps, 'x', 'y');
     var simWidth = this.width/4;
     var simHeight = this.height/4;
     this.zTreshold = 0.01;
@@ -99,7 +99,7 @@ sys.Window.create({
       tint:               Color.Black,
       zTreshold:          this.zTreshold,
       displacementHeight: this.displacementHeight,
-      textureSize:        new Vec2(2100, 2100),
+      textureSize:        new Vec2(2100, 2100),
       planeSize:          new Vec2(planeSize, planeSize),
       numSteps:           numSteps
     }));
@@ -116,7 +116,7 @@ sys.Window.create({
     }), { lines: true });
 
 
-    this.camera = new PerspectiveCamera(120, this.width / this.height, 0.1, 10);
+    this.camera = new PerspectiveCamera(110, this.width / this.height, 0.1, 10);
 
     this.drawVelocityForceAuto = new DrawForce({
       width:  this.width
@@ -325,6 +325,7 @@ sys.Window.create({
 
   setupGui: function () {
     this.gui = new GUI(this);
+    this.gui.toggleEnabled();
 
     this.gui.addHeader('Drawing options');
     this.gui.addParam('Wireframe \'w\'', this, 'wireframe');
@@ -363,7 +364,7 @@ sys.Window.create({
           }));
 
     this.gui.addHeader('Mouse options')
-      .setPosition(180, 10);
+      .setPosition(this.width - 380, 10);
     this.gui.addParam('MD Density Strength',
         this.drawDensityForce, 'strength',{min: 0, max:5});
     this.gui.addParam('MD Density Radius',
@@ -378,27 +379,22 @@ sys.Window.create({
         this.drawVelocityForce, 'edge',{min: 0, max:1});
 
 
-    this.gui.addHeader('Dripping')
-      .setPosition(1100, 10);
-    this.gui.addParam('Dripping', this, 'dripping');
-    this.gui.addParam('Drip chance', this, 'dripChance', {min: 1, max: 500});
-    this.gui.addParam('DD Density Strength',
-        this.drawDensityForceAuto, 'strength',{min: 0, max: 5});
-    this.gui.addParam('DD Density Radius',
-        this.drawDensityForceAuto, 'radius',{min: 0, max: 0.1});
-    this.gui.addParam('DD Density Edge',
-        this.drawDensityForceAuto, 'edge',{min: 0, max: 1});
-    this.gui.addParam('DV Velocity Strength',
-        this.drawVelocityForceAuto, 'strength',{min: 0, max: 5});
-    this.gui.addParam('DV Velocity Radius',
-        this.drawVelocityForceAuto, 'radius',{min: 0, max: 0.1});
-    this.gui.addParam('DV Velocity Edge',
-        this.drawVelocityForceAuto, 'edge',{min: 0, max: 1});
-
-    this.gui.addHeader('Camera');
-    this.gui.addParam('Camera Pos', this.userCam, 'position');
-    this.gui.addParam('Camera view', this.userCam, 'viewMatrix');
-    this.gui.addParam('Camera proj', this.userCam, 'projectionMatrix');
+//    this.gui.addHeader('Dripping')
+//      .setPosition(1100, 10);
+//    this.gui.addParam('Dripping', this, 'dripping');
+//    this.gui.addParam('Drip chance', this, 'dripChance', {min: 1, max: 500});
+//    this.gui.addParam('DD Density Strength',
+//        this.drawDensityForceAuto, 'strength',{min: 0, max: 5});
+//    this.gui.addParam('DD Density Radius',
+//        this.drawDensityForceAuto, 'radius',{min: 0, max: 0.1});
+//    this.gui.addParam('DD Density Edge',
+//        this.drawDensityForceAuto, 'edge',{min: 0, max: 1});
+//    this.gui.addParam('DV Velocity Strength',
+//        this.drawVelocityForceAuto, 'strength',{min: 0, max: 5});
+//    this.gui.addParam('DV Velocity Radius',
+//        this.drawVelocityForceAuto, 'radius',{min: 0, max: 0.1});
+//    this.gui.addParam('DV Velocity Edge',
+//        this.drawVelocityForceAuto, 'edge',{min: 0, max: 1});
 
     this.on('keyDown', function(e) {
       if (e.str == 'w') {
@@ -474,38 +470,28 @@ sys.Window.create({
     this.lastMouse = new Vec2(0, 0);
 
     this.on('mouseMoved', function (e) {
-      if (!this.drawWithMouse) return;
-      var mouse = new Vec2();
-      mouse.x = e.x / this.width;
-      mouse.y = (this.height - e.y) / this.height;
-      this.lastMouse.x = mouse.x;
-      this.lastMouse.y = mouse.y;
+      //if (!this.drawWithMouse) return;
+      //var mouse = new Vec2();
+      //mouse.x = e.x / this.width;
+      //mouse.y = (this.height - e.y) / this.height;
+      //this.lastMouse.x = mouse.x;
+      //this.lastMouse.y = mouse.y;
     }.bind(this));
 
     this.on('mouseDragged', function(e) {
       if (!this.drawWithMouse) return;
       var mouse = new Vec2();
 
-      // new----
       var worldRay = this.camera.getWorldRay(e.x, e.y, this.width, this.height);
       var planeCenter = new Vec3(0, 0, 0);
-      var planeNormal = new Vec3(0, 1, 0);
+      var planeNormal = new Vec3(0, 0, 1);
       var hits = worldRay.hitTestPlane(planeCenter, planeNormal);
       var hit = hits[0];
 
-      console.log(e);
       if (hit) {
-        //console.log("hit:" + hit);
-        console.log("x: " + (hit.x + 1) / 2);
-        console.log("y: " + (hit.y + 1) / 2);
-
+        mouse.x = ((hit.x + (this.planeSize/2)) / this.planeSize);
+        mouse.y = ((hit.y + (this.planeSize/2)) / this.planeSize);
       }
-      // new-----
-
-      mouse.x = e.x / this.width;
-      mouse.y = (this.height - e.y) / this.height;
-
-      console.log("mouse:" + mouse);
 
       var velocity = mouse.dup().sub(this.lastMouse);
       var vec = new Vec3(velocity.x, velocity.y, 0);
@@ -1360,7 +1346,7 @@ var Color = color.Color;
 var merge = require('merge');
 
 
-var DisplacedMatCapGLSL = "#ifdef VERT\n\nuniform mat4 projectionMatrix;\nuniform mat4 modelViewMatrix;\nuniform mat4 normalMatrix;\nuniform float time;\nuniform float pointSize;\nattribute vec3 position;\nattribute vec3 normal;\nattribute vec2 texCoord;\n\nvarying vec3 e;\nvarying vec3 n;\nvarying vec3 p;\n\nuniform sampler2D displacementMap;\nuniform float displacementHeight;\nuniform vec2 textureSize;\nuniform vec2 planeSize;\nuniform float numSteps;\n\n\nvoid main() {\n    vec3 pos = position;\n    float height = displacementHeight * texture2D(displacementMap, texCoord).r;\n\n    float heightRight =\n                  displacementHeight *\n                  texture2D(displacementMap, texCoord + vec2(2.0/textureSize.x, 0.0)).r;\n\n    float heightFront =\n                  displacementHeight *\n                  texture2D(displacementMap, texCoord + vec2(0.0, 2.0/textureSize.y)).r;\n\n    height = displacementHeight * texture2D(displacementMap, texCoord).r;\n    heightRight =\n              displacementHeight *\n              texture2D(displacementMap, texCoord + vec2(2.0/textureSize.x, 0.0)).r;\n\n    heightFront =\n              displacementHeight *\n              texture2D(displacementMap, texCoord + vec2(0.0, 2.0/textureSize.y)).r;\n\n    vec3 right =\n              normalize(vec3(2.0*planeSize.x/numSteps, heightRight, 0.0) -\n              vec3(0.0, height, 0.0));\n\n    vec3 front =\n              normalize(vec3(0.0, heightFront, 2.0*planeSize.y/numSteps) -\n              vec3(0.0, height, 0.0));\n\n    vec3 up = normalize(cross(right, -front));\n\n    vec3 N = up;\n\n    pos.z += height * 5.0;\n    //pos.z = log2(pos.z * 50.0) / 20.0;\n    gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);\n\n    e = normalize(vec3(modelViewMatrix * vec4(position, 1.0)));\n    n = normalize(vec3(normalMatrix * vec4(N, 1.0)));\n    p = pos;\n}\n\n#endif\n\n#ifdef FRAG\n\nuniform vec4 tint;\nuniform float zTreshold;\nuniform sampler2D texture;\nuniform bool showNormals;\n\nvarying vec3 e;\nvarying vec3 n;\nvarying vec3 p;\n\n\nvoid main() {\n    //vec3 r = (reflect(e, n));\n    vec3 r = n;\n    float m = 2.0 * sqrt(r.x * r.x + r.y * r.y + (r.z + 1.0) * (r.z + 1.0));\n    vec2 N = r.xy / m + 0.5;\n    vec3 base = texture2D( texture, N ).rgb;\n\n    if (length(tint.xyz) > 0.0) {\n        gl_FragColor = tint;\n    }\n    else {\n        gl_FragColor = vec4( base, 1.0 );\n    }\n\n    if (showNormals) {\n        gl_FragColor = vec4(n * 0.5 + 0.5, 1.0);\n    }\n\n    //gl_FragColor.w = p.z * p.z * 30.0;\n\n    //gl_FragColor *= log2(p.z * p.z * 120.0) / 3.0;\n\n    //if (p.z < zTreshold) discard;\n}\n#endif\n";
+var DisplacedMatCapGLSL = "#ifdef VERT\n\nuniform mat4 projectionMatrix;\nuniform mat4 modelViewMatrix;\nuniform mat4 normalMatrix;\nuniform float time;\nuniform float pointSize;\nattribute vec3 position;\nattribute vec3 normal;\nattribute vec2 texCoord;\n\nvarying vec3 e;\nvarying vec3 n;\nvarying vec3 p;\n\nuniform sampler2D displacementMap;\nuniform float displacementHeight;\nuniform vec2 textureSize;\nuniform vec2 planeSize;\nuniform float numSteps;\n\n\nvoid main() {\n    vec3 pos = position;\n    float height = displacementHeight * texture2D(displacementMap, texCoord).r;\n\n    float heightRight =\n                  displacementHeight *\n                  texture2D(displacementMap, texCoord + vec2(2.0/textureSize.x, 0.0)).r;\n\n    float heightFront =\n                  displacementHeight *\n                  texture2D(displacementMap, texCoord + vec2(0.0, 2.0/textureSize.y)).r;\n\n    height = displacementHeight * texture2D(displacementMap, texCoord).r;\n    heightRight =\n              displacementHeight *\n              texture2D(displacementMap, texCoord + vec2(2.0/textureSize.x, 0.0)).r;\n\n    heightFront =\n              displacementHeight *\n              texture2D(displacementMap, texCoord + vec2(0.0, 2.0/textureSize.y)).r;\n\n    vec3 right =\n              normalize(vec3(2.0*planeSize.x/numSteps, heightRight, 0.0) -\n              vec3(0.0, height, 0.0));\n\n    vec3 front =\n              normalize(vec3(0.0, heightFront, 2.0*planeSize.y/numSteps) -\n              vec3(0.0, height, 0.0));\n\n    vec3 up = normalize(cross(right, -front));\n\n    vec3 N = up;\n\n    pos.z += height * 5.0;\n    pos.z = log2(pos.z * 50.0) / 20.0;\n    gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);\n\n    e = normalize(vec3(modelViewMatrix * vec4(position, 1.0)));\n    n = normalize(vec3(normalMatrix * vec4(N, 1.0)));\n    p = pos;\n}\n\n#endif\n\n#ifdef FRAG\n\nuniform vec4 tint;\nuniform float zTreshold;\nuniform sampler2D texture;\nuniform bool showNormals;\n\nvarying vec3 e;\nvarying vec3 n;\nvarying vec3 p;\n\n\nvoid main() {\n    //vec3 r = (reflect(e, n));\n    vec3 r = n;\n    float m = 2.0 * sqrt(r.x * r.x + r.y * r.y + (r.z + 1.0) * (r.z + 1.0));\n    vec2 N = r.xy / m + 0.5;\n    vec3 base = texture2D( texture, N ).rgb;\n\n    if (length(tint.xyz) > 0.0) {\n        gl_FragColor = tint;\n    }\n    else {\n        gl_FragColor = vec4( base, 1.0 );\n    }\n\n    if (showNormals) {\n        gl_FragColor = vec4(n * 0.5 + 0.5, 1.0);\n    }\n\n    gl_FragColor.w = p.z * p.z * 30.0;\n\n    //gl_FragColor *= log2(p.z * p.z * 120.0) / 3.0;\n\n    if (p.z < zTreshold) discard;\n}\n#endif\n";
 
 function DisplacedMatCap(uniforms) {
   this.gl = Context.currentContext;
