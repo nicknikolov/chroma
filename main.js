@@ -33,8 +33,15 @@ var Ray = geom.Ray;
 
 //var TileRender = require('./TileRender');
 var DPI = 1;
-var width = window.innerWidth < 768 ? window.innerWidth : 768;
-var height = window.innerHeight < 1024 ? window.innerHeight : 1024;
+
+if (Platform.isBrowser) {
+  var width = window.innerWidth < 768 ? window.innerWidth : 768;
+  var height = window.innerHeight < 1024 ? window.innerHeight : 1024;
+}
+else {
+  var width = 768;
+  var height = 1024;
+}
 
 sys.Window.create({
   settings: {
@@ -47,7 +54,7 @@ sys.Window.create({
     type: '3d',
     fullscreen: Platform.isBrowser ? false : false,
     highdpi: DPI,
-    canvas: document.getElementById('pex')
+    canvas: Platform.isBrowser ? document.getElementById('pex') : null
   },
 
   wireframe:            false,
