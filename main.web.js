@@ -34,8 +34,15 @@ var Ray = geom.Ray;
 
 //var TileRender = require('./TileRender');
 var DPI = 1;
-var width = window.innerWidth < 768 ? window.innerWidth : 768;
-var height = window.innerHeight < 1024 ? window.innerHeight : 1024;
+
+if (Platform.isBrowser) {
+  var width = window.innerWidth < 768 ? window.innerWidth : 768;
+  var height = window.innerHeight < 1024 ? window.innerHeight : 1024;
+}
+else {
+  var width = 768;
+  var height = 1024;
+}
 
 sys.Window.create({
   settings: {
@@ -48,7 +55,7 @@ sys.Window.create({
     type: '3d',
     fullscreen: Platform.isBrowser ? false : false,
     highdpi: DPI,
-    canvas: document.getElementById('pex')
+    canvas: Platform.isBrowser ? document.getElementById('pex') : null
   },
 
   wireframe:            false,
@@ -1354,7 +1361,7 @@ var Color = color.Color;
 var merge = require('merge');
 
 
-var DisplacedMatCapGLSL = "#ifdef VERT\n\nuniform mat4 projectionMatrix;\nuniform mat4 modelViewMatrix;\nuniform mat4 normalMatrix;\nuniform float time;\nuniform float pointSize;\nattribute vec3 position;\nattribute vec3 normal;\nattribute vec2 texCoord;\n\nvarying vec3 e;\nvarying vec3 n;\nvarying vec3 p;\n\nuniform sampler2D displacementMap;\nuniform float displacementHeight;\nuniform vec2 textureSize;\nuniform vec2 planeSize;\nuniform float numSteps;\n\n\nvoid main() {\n    vec3 pos = position;\n    float height = displacementHeight * texture2D(displacementMap, texCoord).r;\n\n    float heightRight =\n                  displacementHeight *\n                  texture2D(displacementMap, texCoord + vec2(2.0/textureSize.x, 0.0)).r;\n\n    float heightFront =\n                  displacementHeight *\n                  texture2D(displacementMap, texCoord + vec2(0.0, 2.0/textureSize.y)).r;\n\n    height = displacementHeight * texture2D(displacementMap, texCoord).r;\n    heightRight =\n              displacementHeight *\n              texture2D(displacementMap, texCoord + vec2(2.0/textureSize.x, 0.0)).r;\n\n    heightFront =\n              displacementHeight *\n              texture2D(displacementMap, texCoord + vec2(0.0, 2.0/textureSize.y)).r;\n\n    vec3 right =\n              normalize(vec3(2.0*planeSize.x/numSteps, heightRight, 0.0) -\n              vec3(0.0, height, 0.0));\n\n    vec3 front =\n              normalize(vec3(0.0, heightFront, 2.0*planeSize.y/numSteps) -\n              vec3(0.0, height, 0.0));\n\n    vec3 up = normalize(cross(right, -front));\n\n    vec3 N = up;\n\n    pos.z += height * 5.0;\n    pos.z = log2(pos.z * 50.0) / 20.0;\n    gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);\n\n    e = normalize(vec3(modelViewMatrix * vec4(position, 1.0)));\n    n = normalize(vec3(normalMatrix * vec4(N, 1.0)));\n    p = pos;\n}\n\n#endif\n\n#ifdef FRAG\n\nuniform vec4 tint;\nuniform float zTreshold;\nuniform sampler2D texture;\nuniform bool showNormals;\n\nvarying vec3 e;\nvarying vec3 n;\nvarying vec3 p;\n\n\nvoid main() {\n    //vec3 r = (reflect(e, n));\n    vec3 r = n;\n    float m = 2.0 * sqrt(r.x * r.x + r.y * r.y + (r.z + 1.0) * (r.z + 1.0));\n    vec2 N = r.xy / m + 0.5;\n    vec3 base = texture2D( texture, N ).rgb;\n\n    if (length(tint.xyz) > 0.0) {\n        gl_FragColor = tint;\n    }\n    else {\n        gl_FragColor = vec4( base, 1.0 );\n    }\n\n    if (showNormals) {\n        gl_FragColor = vec4(n * 0.5 + 0.5, 1.0);\n    }\n\n    gl_FragColor.w = p.z * p.z * 30.0;\n\n    //gl_FragColor *= log2(p.z * p.z * 120.0) / 3.0;\n\n    if (p.z < zTreshold) discard;\n}\n#endif\n";
+var DisplacedMatCapGLSL = "#ifdef VERT\n\nuniform mat4 projectionMatrix;\nuniform mat4 modelViewMatrix;\nuniform mat4 normalMatrix;\nuniform float time;\nuniform float pointSize;\nattribute vec3 position;\nattribute vec3 normal;\nattribute vec2 texCoord;\n\nvarying vec3 e;\nvarying vec3 n;\nvarying vec3 p;\n\nuniform sampler2D displacementMap;\nuniform float displacementHeight;\nuniform vec2 textureSize;\nuniform vec2 planeSize;\nuniform float numSteps;\n\n\nvoid main() {\n    vec3 pos = position;\n    float height = displacementHeight * texture2D(displacementMap, texCoord).r;\n\n    float heightRight =\n                  displacementHeight *\n                  texture2D(displacementMap, texCoord + vec2(2.0/textureSize.x, 0.0)).r;\n\n    float heightFront =\n                  displacementHeight *\n                  texture2D(displacementMap, texCoord + vec2(0.0, 2.0/textureSize.y)).r;\n\n    vec3 right =\n              normalize(vec3(2.0*planeSize.x/numSteps, heightRight, 0.0) -\n              vec3(0.0, height, 0.0));\n\n    vec3 front =\n              normalize(vec3(0.0, heightFront, 2.0*planeSize.y/numSteps) -\n              vec3(0.0, height, 0.0));\n\n    vec3 up = normalize(cross(right, -front));\n\n    vec3 N = up;\n\n    pos.z += height * 5.0;\n    pos.z = log2(pos.z * 50.0) / 20.0;\n    gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);\n\n    n = normalize(vec3(normalMatrix * vec4(N, 1.0)));\n    p = pos;\n}\n\n#endif\n\n#ifdef FRAG\n\nuniform float zTreshold;\nuniform sampler2D texture;\nvarying vec3 n;\nvarying vec3 p;\n\nvoid main() {\n    vec3 r = n;\n    float m = 2.0 * sqrt(r.x * r.x + r.y * r.y + (r.z + 1.0) * (r.z + 1.0));\n    vec2 N = r.xy / m + 0.5;\n    vec3 base = texture2D( texture, N ).rgb;\n\n    gl_FragColor = vec4( base, 1.0 );\n    gl_FragColor.w = p.z * p.z * 30.0;\n\n    if (p.z < zTreshold) discard;\n}\n#endif\n";
 
 function DisplacedMatCap(uniforms) {
   this.gl = Context.currentContext;
