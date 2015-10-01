@@ -34,14 +34,21 @@ var Ray = geom.Ray;
 
 //var TileRender = require('./TileRender');
 var DPI = 1;
+var width = window.innerWidth < 768 ? window.innerWidth : 768;
+var height = window.innerHeight < 1024 ? window.innerHeight : 1024;
 
 sys.Window.create({
   settings: {
-    width: 1024 * DPI,
-    height: 768 * DPI,
+   // width: 768 * DPI,
+   // height: 1024 * DPI,
+   // width: window.innerWidth * DPI,
+   // height: window.innerHeight * DPI,
+    width: width,
+    height: height,
     type: '3d',
-    fullscreen: Platform.isBrowser ? true : false,
-    highdpi: DPI
+    fullscreen: Platform.isBrowser ? false : false,
+    highdpi: DPI,
+    canvas: document.getElementById('pex')
   },
 
   wireframe:            false,
@@ -230,9 +237,10 @@ sys.Window.create({
 
     this.blurredFluidTexture = fx()
       .asFXStage(this.fluidTexture, 'ft')
-      .blur5({ bpp: 32 })
-      .blur5({ bpp: 32 })
-      .blur5({ bpp: 32 })
+      //.downsample2()
+      //.blur5({ bpp: 32 })
+      //.blur5({ bpp: 32 })
+      //.blur5({ bpp: 32 })
       .getSourceTexture();
 
     this.screenImage.setImage(this.blurredFluidTexture);
@@ -470,12 +478,12 @@ sys.Window.create({
     this.lastMouse = new Vec2(0, 0);
 
     this.on('mouseMoved', function (e) {
-      //if (!this.drawWithMouse) return;
-      //var mouse = new Vec2();
-      //mouse.x = e.x / this.width;
-      //mouse.y = (this.height - e.y) / this.height;
-      //this.lastMouse.x = mouse.x;
-      //this.lastMouse.y = mouse.y;
+     // if (!this.drawWithMouse) return;
+     // var mouse = new Vec2();
+     // mouse.x = e.x / this.width;
+     // mouse.y = (this.height - e.y) / this.height;
+     // this.lastMouse.x = mouse.x;
+     // this.lastMouse.y = mouse.y;
     }.bind(this));
 
     this.on('mouseDragged', function(e) {
