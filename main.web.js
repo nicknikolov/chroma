@@ -36,8 +36,12 @@ var Ray = geom.Ray;
 var DPI = 1;
 
 if (Platform.isBrowser) {
-  var width = window.innerWidth < 768 ? window.innerWidth : 768;
-  var height = window.innerHeight < 1024 ? window.innerHeight : 1024;
+  var canvasStyle = window.getComputedStyle(document.getElementById('pex'), null);
+  var height = parseInt(canvasStyle.getPropertyValue('height'));
+  var width = parseInt(canvasStyle.getPropertyValue('width'));
+
+  //var width = window.innerWidth < 768 ? window.innerWidth : 768;
+  //var height = window.innerHeight < 1024 ? window.innerHeight : 1024;
 }
 else {
   var width = 768;
