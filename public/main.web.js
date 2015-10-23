@@ -35,6 +35,8 @@ var Ray = geom.Ray;
 //var TileRender = require('./TileRender');
 var DPI = 1;
 
+var socket = window.socket;
+
 if (Platform.isBrowser) {
   var canvasStyle = window.getComputedStyle(document.getElementById('pex'), null);
   var height = parseInt(canvasStyle.getPropertyValue('height'));
@@ -42,6 +44,7 @@ if (Platform.isBrowser) {
 
   //var width = window.innerWidth < 768 ? window.innerWidth : 768;
   //var height = window.innerHeight < 1024 ? window.innerHeight : 1024;
+
 }
 else {
   var width = 768;
@@ -83,6 +86,7 @@ sys.Window.create({
   },
 
   init: function() {
+    this.socket = socket;
     this.planeSize = 10;
     var planeSize = this.planeSize;
     var numSteps = 600;
@@ -108,8 +112,8 @@ sys.Window.create({
 
     this.textures = [
       Texture2D.load('assets/chroma.jpg')
-    , Texture2D.load('assets/chroma2.png')
-    , Texture2D.load('assets/plastic_red.jpg')
+   // , Texture2D.load('assets/chroma2.png')
+   // , Texture2D.load('assets/plastic_red.jpg')
     ];
 
     this.mesh = new Mesh(planeTri, new DisplacedMatCap({
@@ -497,7 +501,37 @@ sys.Window.create({
      // this.lastMouse.y = mouse.y;
     }.bind(this));
 
+    this.socket.on('message', function(e){
+      console.log('message: ' + e.x, e.y);
+      if (!this.drawWithMouse) return;
+      var mouse = new Vec2();
+
+      var worldRay = this.camera.getWorldRay(e.x, e.y, this.width, this.height);
+      var planeCenter = new Vec3(0, 0, 0);
+      var planeNormal = new Vec3(0, 0, 1);
+      var hits = worldRay.hitTestPlane(planeCenter, planeNormal);
+      var hit = hits[0];
+
+      if (hit) {
+        mouse.x = ((hit.x + (this.planeSize/2)) / this.planeSize);
+        mouse.y = ((hit.y + (this.planeSize/2)) / this.planeSize);
+      }
+
+      var velocity = mouse.dup().sub(this.lastMouse);
+      var vec = new Vec3(velocity.x, velocity.y, 0);
+
+      this.drawVelocityForce.force = vec.clone();
+      this.drawVelocityForce.applyForce(mouse);
+      this.drawDensityForce.applyForce(mouse);
+
+      this.lastMouse.x = mouse.x;
+      this.lastMouse.y = mouse.y;
+    }.bind(this));
+
     this.on('mouseDragged', function(e) {
+
+      this.socket.emit('message', {x: e.x, y: e.y});
+
       if (!this.drawWithMouse) return;
       var mouse = new Vec2();
 
@@ -524,864 +558,20 @@ sys.Window.create({
 
     }.bind(this));
 
+
     this.on('keyDown', function (e) {
       if (e.str == 'x') {
         this.drawWithMouse = !this.drawWithMouse;
         this.gui.items[0].dirty = true;
       }
     }.bind(this));
+
   }
 });
 
-},{"./fluid/DrawForce":2,"./fluid/fluid":5,"./materials/DisplacedMatCap":13,"pex-color":177,"pex-fx":180,"pex-gen":197,"pex-geom":212,"pex-glu":230,"pex-gui":246,"pex-materials":251,"pex-random":268,"pex-sys":272}],2:[function(require,module,exports){
-var Program = require('pex-glu').Program;
-var FBO = require('pex-glu').RenderTarget;
-var FrameRenderer = require('./FrameRenderer');
-var Color = require('pex-color').Color;
-var Vec2 = require('pex-geom').Vec2;
-var Vec3 = require('pex-geom').Vec3;
-var Vec4 = require('pex-geom').Vec4;
+},{"./fluid/DrawForce":267,"./fluid/fluid":270,"./materials/DisplacedMatCap":278,"pex-color":165,"pex-fx":168,"pex-gen":185,"pex-geom":200,"pex-glu":218,"pex-gui":234,"pex-materials":239,"pex-random":256,"pex-sys":260}],2:[function(require,module,exports){
 
-var glu = require('pex-glu');
-
-var shader = "#ifdef VERT\n\nattribute vec2 position;\nattribute vec2 texCoord;\nuniform vec2 screenSize;\nuniform vec2 pixelPosition;\nuniform vec2 pixelSize;\nvarying vec2 tc;\n\nvoid main() {\n  float tx = position.x * 0.5 + 0.5; //-1 -> 0, 1 -> 1\n  float ty = -position.y * 0.5 + 0.5; //-1 -> 1, 1 -> 0\n  //(x + 0)/sw * 2 - 1, (x + w)/sw * 2 - 1\n  float x = (pixelPosition.x + pixelSize.x * tx)/screenSize.x * 2.0 - 1.0;  //0 -> -1, 1 -> 1\n  //1.0 - (y + h)/sh * 2, 1.0 - (y + h)/sh * 2\n  float y = 1.0 - (pixelPosition.y + pixelSize.y * ty)/screenSize.y * 2.0;  //0 -> 1, 1 -> -1\n  gl_Position = vec4(x, y, 0.0, 1.0);\n  tc = texCoord;\n}\n\n#endif\n\n#ifdef FRAG\n\nuniform vec2 Point;\nuniform float\tRadius;\nuniform float\tEdgeSmooth;\nuniform vec4 Value;\nuniform float Width;\nuniform float Height;\nvarying vec2 tc;\n\nvoid main(){\n  vec2 texelSize = vec2(Width, Height);\n  vec2 tcs = tc * texelSize;\n  vec4 color = Value;\n  float d = distance(Point, tcs);\n  float a = max((Radius - d) / Radius, 0.0);\n  float c = ceil(a);\n  color.xyz *= c;\n  color.w *= pow(a, EdgeSmooth + 0.1);\n  gl_FragColor = color;\n}\n\n#endif\n\n";
-
-module.exports = DrawForce;
-
-function DrawForce (options) {
-  this.width = options.width;
-  this.height = options.height;
-  this.type = options.type;
-  this.isTemporary = options.isTemporary;
-  this.radius = 0.05;
-  this.strength = 2.5;
-  this.force = new Vec3(0.3, 0.7, 0.9);
-  this.edge = 1;
-
-  this.forceBuffer = new FBO(this.width, this.height, { bpp: 32 });
-  this.density = new Color(1, 1, 1, 1);
-  this.velocity = new Vec2(0,0);
-
-
-  this.forceChanged = false;
-  this.forceApplied = false;
-
-  this._program = new Program(shader);
-  this._frameRenderer = new FrameRenderer(0, 0, this.width, this.height,
-                                                this.width, this.height);
-
-}
-
-DrawForce.prototype.applyForce = function (normalizedPos) {
-  var absPos = normalizedPos.dup();
-  absPos.x *= this.width;
-  absPos.y *= this.height;
-  var absRadius = this.radius * this.width;
-
-  // && allow for multiple temporal forces
-  if (this.isTemporary && !this.forceApplied) this.clear();
-
-  var typeForce = this.force.clone();
-  if (this.type === 'velocity') {
-    typeForce.x *= this.width;
-    typeForce.y *= this.width;
-  }
-
-  var value = new Vec4(typeForce.x, typeForce.y, typeForce.z, 1.0);
-  glu.enableAlphaBlending();
-  this.forceBuffer.bind();
-  this._program.use();
-  // vert
-  this._program.uniforms.screenSize(new Vec2(this.width, this.height));
-  this._program.uniforms.pixelPosition(new Vec2(0, 0));
-  this._program.uniforms.pixelSize(new Vec2(this.width, this.height));
-  // frag
-  this._program.uniforms.Point(absPos);
-  this._program.uniforms.Width(this.width);
-  this._program.uniforms.Height(this.height);
-  this._program.uniforms.Radius(absRadius);
-  this._program.uniforms.EdgeSmooth(this.edge);
-  this._program.uniforms.Value(value);
-  this._frameRenderer.draw(this._program);
-  this.forceBuffer.unbind();
-  glu.enableBlending(false);
-
-  this.forceApplied = true;
-}
-
-DrawForce.prototype.clear = function () {
-  this.forceBuffer.bind();
-  glu.clearColor(Color.Black);
-  this.forceBuffer.unbind();
-}
-
-DrawForce.prototype.update = function () {
-  if      (this.forceApplied) this.forceChanged = true;
-  else if (this.isTemporary)  this.forceChanged = false;
-  this.forceApplied = false;
-}
-
-
-
-},{"./FrameRenderer":3,"pex-color":177,"pex-geom":212,"pex-glu":230}],3:[function(require,module,exports){
-var geom = require('pex-geom');
-var Vec2 = geom.Vec2;
-var Geometry = geom.Geometry;
-var glu = require('pex-glu');
-var Program = glu.Program;
-var Material = glu.Material;
-var Mesh = glu.Mesh;
-
-
-var shader = "#ifdef VERT\n\nattribute vec2 position;\nattribute vec2 texCoord;\nuniform vec2 screenSize;\nuniform vec2 pixelPosition;\nuniform vec2 pixelSize;\nvarying vec2 vTexCoord;\n\nvoid main() {\n  float tx = position.x * 0.5 + 0.5; //-1 -> 0, 1 -> 1\n  float ty = -position.y * 0.5 + 0.5; //-1 -> 1, 1 -> 0\n  //(x + 0)/sw * 2 - 1, (x + w)/sw * 2 - 1\n  float x = (pixelPosition.x + pixelSize.x * tx)/screenSize.x * 2.0 - 1.0;  //0 -> -1, 1 -> 1\n  //1.0 - (y + h)/sh * 2, 1.0 - (y + h)/sh * 2\n  float y = 1.0 - (pixelPosition.y + pixelSize.y * ty)/screenSize.y * 2.0;  //0 -> 1, 1 -> -1\n  gl_Position = vec4(x, y, 0.0, 1.0); \n  //gl_Position = vec4(position.xy, 0.0, 1.0);\n\n  vTexCoord = texCoord;\n}\n\n#endif\n\n#ifdef FRAG\n\nvarying vec2 vTexCoord;\nuniform sampler2D image;\nuniform float alpha;\n\nvoid main() {\n  gl_FragColor = texture2D(image, vTexCoord);\n  gl_FragColor.a *= alpha;\n}\n\n#endif\n\n";
-
-function FrameRenderer(x, y, w, h, screenWidth, screenHeight) {
-  x = x !== undefined ? x : 0;
-  y = y !== undefined ? y : 0;
-  w = w !== undefined ? w : 1;
-  h = h !== undefined ? h : 1;
-  screenWidth = screenWidth !== undefined ? screenWidth : 1;
-  screenHeight = screenHeight !== undefined ? screenHeight : 1;
-  var program = new Program(shader);
-  var uniforms = {
-    screenSize: Vec2.create(screenWidth, screenHeight),
-    pixelPosition: Vec2.create(x, y),
-    pixelSize: Vec2.create(w, h),
-    alpha: 1
-  };
-  var material = new Material(program, uniforms);
-  var vertices = [
-    new Vec2(-1, 1),
-    new Vec2(-1, -1),
-    new Vec2(1, -1),
-    new Vec2(1, 1)
-  ];
-//  var vertices = [
-//    new Vec2(-0.9, 0.9),
-//    new Vec2(-0.9, -0.9),
-//    new Vec2(0.9, -0.9),
-//    new Vec2(0.9, 0.9)
-//  ];
-  var texCoords = [
-    new Vec2(0, 1),
-    new Vec2(0, 0),
-    new Vec2(1, 0),
-    new Vec2(1, 1)
-  ];
-  var geometry = new Geometry({
-    vertices: vertices,
-    texCoords: texCoords,
-    faces: true
-  });
-  // 0----3  0,1   1,1
-  // | \  |      u
-  // |  \ |      v
-  // 1----2  0,0   0,1
-  geometry.faces.push([0, 1, 2]);
-  geometry.faces.push([0, 2, 3]);
-  this.mesh = new Mesh(geometry, material);
-}
-
-FrameRenderer.prototype.setAlpha = function (alpha) {
-  this.mesh.material.uniforms.alpha = alpha;
-};
-
-FrameRenderer.prototype.setPosition = function (position) {
-  this.mesh.material.uniforms.pixelPosition = position;
-};
-
-FrameRenderer.prototype.setSize = function (size) {
-  this.mesh.material.uniforms.pixelSize = size;
-};
-
-FrameRenderer.prototype.setScreenSize = function (size) {
-  this.mesh.material.uniforms.screenSize = size;
-};
-
-FrameRenderer.prototype.setBounds = function (bounds) {
-  this.mesh.material.uniforms.pixelPosition.x = bounds.x;
-  this.mesh.material.uniforms.pixelPosition.y = bounds.y;
-  this.mesh.material.uniforms.pixelSize.x = bounds.width;
-  this.mesh.material.uniforms.pixelSize.y = bounds.height;
-};
-
-FrameRenderer.prototype.draw = function (program) {
-  this.mesh.setProgram(program);
-  this.mesh.draw();
-};
-
-module.exports = FrameRenderer;
-
-},{"pex-geom":212,"pex-glu":230}],4:[function(require,module,exports){
-var glu = require('pex-glu');
-var FBO = glu.RenderTarget;
-
-function PingPong (options) {
-  var options = options || {};
-  this.width = options.width || 512;
-  this.height = options.height || 512;
-  this.fboOpts = options.fboOpts || {};
-
-  this.sourceBuffer = new FBO(this.width, this.height, this.fboOpts);
-  this.destBuffer = new FBO(this.width, this.height, this.fboOpts);
-}
-
-PingPong.prototype.swap = function () {
-  var temp = this.sourceBuffer;
-  this.sourceBuffer = this.destBuffer;
-  this.destBuffer = temp;
-}
-
-PingPong.prototype.clear = function () {
-  this.sourceBuffer.bindAndClear();
-  this.sourceBuffer.unbind();
-  this.destBuffer.bindAndClear();
-  this.destBuffer.unbind();
-}
-
-module.exports = PingPong;
-
-
-},{"pex-glu":230}],5:[function(require,module,exports){
-var glu = require('pex-glu');
-var Context = glu.Context;
-var Program = glu.Program;
-var FBO = glu.RenderTarget;
-var Texture2D = glu.Texture2D;
-var ScreenImage = glu.ScreenImage;
-var Color = require('pex-color').Color;
-var Material = require('../pex-hacks/Material.js');
-var merge = require('merge');
-var sys = require('pex-sys');
-
-var PingPong = require('./PingPong.js');
-//Shaders
-var AdvectShader = require('./shaders/AdvectShader.js');
-var ClampLengthShader = require('./shaders/ClampLengthShader.js');
-var DiffuseShader = require('./shaders/DiffuseShader.js');
-var DivergenceShader = require('./shaders/DivergenceShader.js');
-var JacobiShader = require('./shaders/JacobiShader.js');
-var AddForceShader = require('./shaders/AddForceShader.js');
-var SubstractGradientShader = require('./shaders/SubstractGradientShader.js');
-var FrameRenderer = require('./FrameRenderer.js');
-
-function Fluid(simWidth, simHeight, drawWidth, drawHeight) {
-
-  // Fluid variables
-  this.width = simWidth;
-  this.height = simHeight;
-  this.drawWidth = drawWidth;
-  this.drawHeight = drawHeight;
-  this.iterations = 40;       // 1 to 100
-  this.speed = 28;            // 0 to 100
-  this.cellSize = 1.25;       // 0.0 to 2.0
-  this.viscosity = 0.5;       // 0 to 1
-  this.dissipation = 0.0017;   // 0 to 0.02
-  this.clampForce = 0.07;     // 0 to 0.1
-  this.maxDensity = 4.25;      // 0 to 5
-  this.maxVelocity = 4;       // 0 to 10
-  //-----------------------------
-
-  this.frameRenderer = new FrameRenderer(0, 0, this.width, this.height,
-                                                this.width, this.height);
-
-  this.densityFrameRenderer = new FrameRenderer(0, 0, drawWidth, drawHeight,
-                                                      drawWidth, drawHeight);
-  var gl = Context.currentContext;
-
-  // Buffers
-  this.densityPingPong  = new PingPong({
-    width: drawWidth
-  , height: drawHeight
-  , fboOpts: { format: gl.RGBA, bpp: 32 }
-  });
-  this.densityPingPong.clear();
-
-  this.velocityPingPong = new PingPong({
-    width: this.width
-  , height: this.height
-  , fboOpts: { format: gl.RGBA, bpp: 32 }
-  });
-  this.velocityPingPong.clear();
-  this.pressurePingPong = new PingPong({width: this.width,
-                                        height: this.height});
-  this.pressurePingPong.clear();
-
-  this.divergenceBuffer = new FBO(this.width, this.height, { bpp: 32 });
-  this.divergenceBuffer.bindAndClear();
-  this.divergenceBuffer.unbind();
-  this.obstacleBuffer = new FBO(this.width, this.height, { bpp: 32 });
-  this.obstacleBuffer.bindAndClear();
-  this.obstacleBuffer.unbind();
-  this.pressureBuffer = new FBO(this.width, this.height, { bpp: 32 });
-  this.pressureBuffer.bindAndClear();
-  this.pressureBuffer.unbind();
-  this.comboObstacleBuffer = new FBO(this.width, this.height, { bpp: 32 });
-  this.comboObstacleBuffer.bindAndClear();
-  this.comboObstacleBuffer.unbind();
-
-  // Shaders
-  this.clampLengthShader = new ClampLengthShader(this.width, this.height);
-  this.advectShader = new AdvectShader(this.width, this.height);
-  this.diffuseShader = new DiffuseShader(this.width, this.height);
-  this.divergenceShader = new DivergenceShader(this.width, this.height);
-  this.jacobiShader = new JacobiShader(this.width, this.height);
-  this.addForceShader = new AddForceShader(this.width, this.height);
-  this.substractGradientShader = new SubstractGradientShader(this.width, this.height);
-
-}
-
-Fluid.prototype.addDensity = function (options) {
-  glu.viewport(0, 0, this.drawWidth, this.drawHeight);
-  var texture = options.texture;
-  var strength = options.strength;
-  glu.enableBlending(false);
-  this.addForceShader.update({
-    destBuffer: this.densityPingPong.destBuffer
-  , backBufferTex: this.densityPingPong.sourceBuffer.getColorAttachment(0)
-  , addTex: texture
-  , force: strength
-  , frameRenderer: this.densityFrameRenderer
-  });
-  this.densityPingPong.swap();
-}
-
-Fluid.prototype.addVelocity = function (options) {
-  glu.viewport(0, 0, this.width, this.height);
-  var texture = options.texture;
-  var strength = options.strength;
-  glu.enableBlending(false);
-  this.addForceShader.update({
-    destBuffer: this.velocityPingPong.destBuffer
-  , backBufferTex: this.velocityPingPong.sourceBuffer.getColorAttachment(0)
-  , addTex: texture
-  , force: strength
-  , frameRenderer: this.frameRenderer
-  });
-  this.velocityPingPong.swap();
-}
-
-Fluid.prototype.iterate = function () {
-  this.deltaTime = sys.Time.delta;
-  this.timeStep = this.deltaTime * this.speed;
-
-  glu.enableBlending(false);
-
-  // Clamp Length
-  if (this.maxDensity > 0) {
-    glu.viewport(0, 0, this.drawWidth, this.drawHeight);
-    this.clampLengthShader.update({
-      destBuffer: this.densityPingPong.destBuffer
-    , backBufferTex: this.densityPingPong.sourceBuffer.getColorAttachment(0)
-    , max: this.maxDensity
-    , clampForce: this.clampForce
-    , frameRenderer: this.densityFrameRenderer
-    });
-    this.densityPingPong.swap();
-  }
-  if (this.maxVelocity > 0) {
-    glu.viewport(0, 0, this.width, this.height);
-    this.clampLengthShader.update({
-      destBuffer: this.velocityPingPong.destBuffer
-    , backBufferTex: this.velocityPingPong.sourceBuffer.getColorAttachment(0)
-    , max: this.maxVelocity
-    , clampForce: this.clampForce
-    , frameRenderer: this.frameRenderer
-    });
-    this.velocityPingPong.swap();
-  }
-
-   // Advect
-  glu.viewport(0, 0, this.width, this.height);
-  this.advectShader.update({
-    destBuffer: this.velocityPingPong.destBuffer
-  , backBufferTex: this.velocityPingPong.sourceBuffer.getColorAttachment(0)
-  , velocityTex: this.velocityPingPong.sourceBuffer.getColorAttachment(0)
-  , obstacleTex: this.comboObstacleBuffer.getColorAttachment(0)
-  , timeStep: this.timeStep
-  , dissipation: 1.0 - this.dissipation
-  , cellSize: this.cellSize
-  , frameRenderer: this.frameRenderer
-  });
-  this.velocityPingPong.swap();
-
-  glu.viewport(0, 0, this.drawWidth, this.drawHeight);
-  this.advectShader.update({
-    destBuffer: this.densityPingPong.destBuffer
-  , backBufferTex: this.densityPingPong.sourceBuffer.getColorAttachment(0)
-  , velocityTex: this.velocityPingPong.sourceBuffer.getColorAttachment(0)
-  , obstacleTex: this.comboObstacleBuffer.getColorAttachment(0)
-  , timeStep: this.timeStep
-  , dissipation: 1.0 - this.dissipation
-  , cellSize: this.cellSize
-  , frameRenderer: this.densityFrameRenderer
-  , type: 'density'
-  });
-  this.densityPingPong.swap();
-
-  // Diffuse
-  if (this.viscosity > 0) {
-  glu.viewport(0, 0, this.width, this.height);
-    for (var i=0; i<this.iterations; i++) {
-      this.diffuseShader.update({
-        destBuffer: this.velocityPingPong.destBuffer
-      , backBufferTex: this.velocityPingPong.sourceBuffer.getColorAttachment(0)
-      , obstacleTex: this.comboObstacleBuffer.getColorAttachment(0)
-      , viscosity: this.viscosity * this.deltaTime
-      , frameRenderer: this.frameRenderer
-      });
-      this.velocityPingPong.swap();
-    }
-  }
-
-  // Divergence and Jacobi
-  this.divergenceBuffer.bindAndClear();
-  this.divergenceBuffer.unbind();
-  glu.viewport(0, 0, this.width, this.height);
-  this.divergenceShader.update({
-    destBuffer: this.divergenceBuffer
-  , velocityTex: this.velocityPingPong.sourceBuffer.getColorAttachment(0)
-  , obstacleTex: this.comboObstacleBuffer.getColorAttachment(0)
-  , cellSize: this.cellSize
-  , frameRenderer: this.frameRenderer
-  });
-
-  this.pressurePingPong.clear();
-  glu.viewport(0, 0, this.width, this.height);
-  for (var i=0; i<this.iterations; i++){
-    this.jacobiShader.update({
-      destBuffer: this.pressurePingPong.destBuffer
-    , backBufferTex: this.pressurePingPong.sourceBuffer.getColorAttachment(0)
-    , obstacleTex: this.obstacleBuffer.getColorAttachment(0)
-    , divergenceTex: this.divergenceBuffer.getColorAttachment(0)
-    , cellSize: this.cellSize
-    , frameRenderer: this.frameRenderer
-    });
-    this.pressurePingPong.swap();
-  }
-
-  if (this.addPressureBufferDidChange) {
-    glu.viewport(0, 0, this.width, this.height);
-    this.addPressureBufferDidChange = false;
-    this.addForceShader.update({
-      destBuffer: this.pressurePingPong.destBuffer
-    , backBuffferTex: this.pressurePingPong.sourceBuffer.getColorAttachment(0)
-    , addTex: this.pressureBuffer.getColorAttachment(0)
-    , force: 1
-    , frameRenderer: this.frameRenderer
-    });
-    this.pressurePingPong.swap();
-  }
-
-  glu.viewport(0, 0, this.width, this.height);
-  this.substractGradientShader.update({
-    destBuffer: this.velocityPingPong.destBuffer
-   , backBufferTex: this.velocityPingPong.sourceBuffer.getColorAttachment(0)
-   , pressureTex: this.pressurePingPong.sourceBuffer.getColorAttachment(0)
-   , obstacleTex: this.comboObstacleBuffer.getColorAttachment(0)
-   , cellSize: this.cellSize
-   , frameRenderer: this.frameRenderer
-  });
-  this.velocityPingPong.swap();
-
-  return this.densityPingPong.destBuffer.getColorAttachment(0);
-
-}
-
-module.exports = Fluid;
-
-
-},{"../pex-hacks/Material.js":280,"./FrameRenderer.js":3,"./PingPong.js":4,"./shaders/AddForceShader.js":6,"./shaders/AdvectShader.js":7,"./shaders/ClampLengthShader.js":8,"./shaders/DiffuseShader.js":9,"./shaders/DivergenceShader.js":10,"./shaders/JacobiShader.js":11,"./shaders/SubstractGradientShader.js":12,"merge":176,"pex-color":177,"pex-glu":230,"pex-sys":272}],6:[function(require,module,exports){
-var glu = require('pex-glu');
-var Context = glu.Context;
-var Program = glu.Program;
-
-var Vec2 = require('pex-geom').Vec2;
-var shader = "#ifdef VERT\n\nattribute vec2 position;\nattribute vec2 texCoord;\nuniform vec2 screenSize;\nuniform vec2 pixelPosition;\nuniform vec2 pixelSize;\nvarying vec2 tc;\n\nvoid main() {\n  float tx = position.x * 0.5 + 0.5; //-1 -> 0, 1 -> 1\n  float ty = -position.y * 0.5 + 0.5; //-1 -> 1, 1 -> 0\n  //(x + 0)/sw * 2 - 1, (x + w)/sw * 2 - 1\n  float x = (pixelPosition.x + pixelSize.x * tx)/screenSize.x * 2.0 - 1.0;  //0 -> -1, 1 -> 1\n  //1.0 - (y + h)/sh * 2, 1.0 - (y + h)/sh * 2\n  float y = 1.0 - (pixelPosition.y + pixelSize.y * ty)/screenSize.y * 2.0;  //0 -> 1, 1 -> -1\n  gl_Position = vec4(x, y, 0.0, 1.0);\n  tc = texCoord;\n}\n\n#endif\n\n#ifdef FRAG\n\nuniform sampler2D Backbuffer;\nuniform sampler2D AddTexture;\nuniform float force;\nuniform vec2 Scale;\nvarying vec2 tc;\n\nvoid main(){\n  vec2 tc2 = tc * Scale;\n\n  vec4 color = texture2D(Backbuffer, tc) + texture2D(AddTexture, tc2) * force;\n  gl_FragColor = color;\n}\n\n#endif\n\n\n\n";
-
-function AddForceShader (width, height) {
-  this.width = width;
-  this.height = height;
-  this._program = new Program(shader);
-  this._program.use();
-}
-
-AddForceShader.prototype.update = function (options) {
-  var destBuffer = options.destBuffer
-    , backBufferTex = options.backBufferTex
-    , addTex = options.addTex
-    , force = options.force
-    , frameRenderer = options.frameRenderer;
-
-  if (!destBuffer) throw new Error("no destBuffer");
-  if (!backBufferTex) throw new Error("no backBufferTex");
-  if (!addTex) throw new Error("no velocityTex");
-  //if (!force) throw new Error("no obstacleTex");
-  if (!frameRenderer) throw new Error("no frameRenderer");
-
-  destBuffer.bind();
-  this._program.use();
-  //vert
-  this._program.uniforms.screenSize(new Vec2(this.width, this.height));
-  this._program.uniforms.pixelPosition(new Vec2(0, 0));
-  this._program.uniforms.pixelSize(new Vec2(this.width, this.height));
-  //frag
-  backBufferTex.bind(0);
-  this._program.uniforms.Backbuffer(0);
-  addTex.bind(1);
-  this._program.uniforms.AddTexture(1);
-  this._program.uniforms.force(force);
-  var scale = new Vec2(addTex.width / destBuffer.width,
-                        addTex.height / destBuffer.height);
-  this._program.uniforms.Scale(scale);
-  frameRenderer.draw(this._program);
-  destBuffer.unbind();
-
-}
-
-module.exports = AddForceShader;
-
-},{"pex-geom":212,"pex-glu":230}],7:[function(require,module,exports){
-var glu = require('pex-glu');
-var Context = glu.Context;
-var Program = glu.Program;
-
-var shader = "#ifdef VERT\n\nattribute vec2 position;\nattribute vec2 texCoord;\nuniform vec2 screenSize;\nuniform vec2 pixelPosition;\nuniform vec2 pixelSize;\nvarying vec2 tc;\n\nvoid main() {\n  float tx = position.x * 0.5 + 0.5; //-1 -> 0, 1 -> 1\n  float ty = -position.y * 0.5 + 0.5; //-1 -> 1, 1 -> 0\n  //(x + 0)/sw * 2 - 1, (x + w)/sw * 2 - 1\n  float x = (pixelPosition.x + pixelSize.x * tx)/screenSize.x * 2.0 - 1.0;  //0 -> -1, 1 -> 1\n  //1.0 - (y + h)/sh * 2, 1.0 - (y + h)/sh * 2\n  float y = 1.0 - (pixelPosition.y + pixelSize.y * ty)/screenSize.y * 2.0;  //0 -> 1, 1 -> -1\n  gl_Position = vec4(x, y, 0.0, 1.0);\n  tc = texCoord ;\n}\n\n#endif\n\n#ifdef FRAG\n\nuniform sampler2D Backbuffer;\nuniform sampler2D Obstacle;\nuniform sampler2D Velocity;\n\nuniform float Width;\nuniform float Height;\nuniform float TimeStep;\nuniform float Dissipation;\nuniform float InverseCellSize;\nuniform vec2 Scale;\nvarying vec2 tc;\n\nvoid main(){\n  vec2 texelSize = vec2(Width, Height);\n  vec2 tcs = tc * texelSize;\n  vec2 tc2 = tc * Scale;\n\n  float xc = texture2D(Obstacle, tc2).x;\n\n  float inverseSolid = 1.0 - ceil(xc - 0.5);\n\n  vec2 u = texture2D(Velocity, tc2).rg / Scale;\n  vec2 coord =  tcs - TimeStep * InverseCellSize * u;\n  coord /= texelSize;\n\n  gl_FragColor = Dissipation * texture2D(Backbuffer, coord) * inverseSolid;\n\n}\n\n#endif\n";
-var Vec2 = require('pex-geom').Vec2;
-
-function AdvectShader (width, height) {
-  this.width = width || 512;
-  this.height = height || 512;
-  this._program = new Program(shader);
-}
-
-AdvectShader.prototype.update = function (options) {
-  var destBuffer = options.destBuffer
-    , backBufferTex = options.backBufferTex
-    , velocityTex = options.velocityTex
-    , obstacleTex = options.obstacleTex
-    , timeStep = options.timeStep
-    , dissipation = options.dissipation
-    , cellSize = options.cellSize
-    , frameRenderer = options.frameRenderer
-    , type = options.type || 'nope';
-
-  if (!destBuffer) throw new Error("no destBuffer");
-  if (!backBufferTex) throw new Error("no backBufferTex");
-  if (!velocityTex) throw new Error("no velocityTex");
-  if (!obstacleTex) throw new Error("no obstacleTex");
-  if (!timeStep) console.log("no timestep");
-  if (!dissipation) throw new Error("no dissipation");
-  if (!cellSize) throw new Error("no cellSize");
-  if (!frameRenderer) throw new Error("no frameRenderer");
-
-  destBuffer.bind();
-  this._program.use();
-  //vert
-  this._program.uniforms.screenSize(new Vec2(this.width, this.height));
-  this._program.uniforms.pixelPosition(new Vec2(0, 0));
-  this._program.uniforms.pixelSize(new Vec2(this.width, this.height));
-  //frag
-  backBufferTex.bind(0);
-  this._program.uniforms.Backbuffer(0);
-  velocityTex.bind(1);
-  this._program.uniforms.Velocity(1);
-  obstacleTex.bind(2);
-  this._program.uniforms.Obstacle(2);
-  this._program.uniforms.Width(this.width);
-  this._program.uniforms.Height(this.height);
-  this._program.uniforms.TimeStep(timeStep);
-  this._program.uniforms.Dissipation(dissipation);
-  this._program.uniforms.InverseCellSize(1.0 / cellSize);
-  var scale = new Vec2(velocityTex.width / destBuffer.width,
-                      velocityTex.height / destBuffer.height);
-  this._program.uniforms.Scale(scale);
-  frameRenderer.draw(this._program);
-  destBuffer.unbind();
-
-}
-
-module.exports = AdvectShader;
-
-
-},{"pex-geom":212,"pex-glu":230}],8:[function(require,module,exports){
-var glu = require('pex-glu');
-var Context = glu.Context;
-var Program = glu.Program;
-
-var shader = "#ifdef VERT\n\nattribute vec2 position;\nattribute vec2 texCoord;\nuniform vec2 screenSize;\nuniform vec2 pixelPosition;\nuniform vec2 pixelSize;\nvarying vec2 tc;\n\nvoid main() {\n  float tx = position.x * 0.5 + 0.5; //-1 -> 0, 1 -> 1\n  float ty = -position.y * 0.5 + 0.5; //-1 -> 1, 1 -> 0\n  //(x + 0)/sw * 2 - 1, (x + w)/sw * 2 - 1\n  float x = (pixelPosition.x + pixelSize.x * tx)/screenSize.x * 2.0 - 1.0;  //0 -> -1, 1 -> 1\n  //1.0 - (y + h)/sh * 2, 1.0 - (y + h)/sh * 2\n  float y = 1.0 - (pixelPosition.y + pixelSize.y * ty)/screenSize.y * 2.0;  //0 -> 1, 1 -> -1\n  gl_Position = vec4(x, y, 0.0, 1.0);\n  tc = texCoord;\n}\n\n#endif\n\n#ifdef FRAG\n\nuniform sampler2D Backbuffer;\nuniform float MaxLength;\nuniform float ClampForce;\nvarying vec2 tc;\n\nvoid main(){\n\n  vec4 color = texture2D(Backbuffer, tc);\n\n  float l = length(color.xyz);\n  if (l > MaxLength) {\n    float dinges = (l - MaxLength) * ClampForce;\n    color.xyz = normalize(color.xyz) * (l - dinges);\n  }\n  gl_FragColor = color ;\n}\n\n\n#endif\n";
-var Vec2 = require('pex-geom').Vec2;
-
-function ClampLengthShader (width, height) {
-  this.width = width || 512;
-  this.height = height || 512;
-  this._program = new Program(shader);
-}
-
-ClampLengthShader.prototype.update = function (options) {
-  var destBuffer = options.destBuffer
-    , backBufferTex = options.backBufferTex
-    , max = options.max
-    , clampForce = options.clampForce
-    , frameRenderer = options.frameRenderer;
-
-  if (!destBuffer) throw new Error("no destBuffer");
-  if (!backBufferTex) throw new Error("no backBufferTex");
-  if (!max) throw new Error("no max");
-  if (!clampForce) throw new Error("no clampForce");
-  if (!frameRenderer) throw new Error("no frameRenderer");
-
-  destBuffer.bind();
-  this._program.use();
-  //vert
-  this._program.uniforms.screenSize(new Vec2(this.width, this.height));
-  this._program.uniforms.pixelPosition(new Vec2(0, 0));
-  this._program.uniforms.pixelSize(new Vec2(this.width, this.height));
-  //frag
-  backBufferTex.bind(0);
-  this._program.uniforms.Backbuffer(0);
-  this._program.uniforms.MaxLength(max);
-  this._program.uniforms.ClampForce(clampForce);
-  frameRenderer.draw(this._program);
-  destBuffer.unbind();
-
-}
-
-module.exports = ClampLengthShader;
-
-},{"pex-geom":212,"pex-glu":230}],9:[function(require,module,exports){
-var glu = require('pex-glu');
-var Context = glu.Context;
-var Program = glu.Program;
-
-var shader  = "#ifdef VERT\n\nattribute vec2 position;\nattribute vec2 texCoord;\nuniform vec2 screenSize;\nuniform vec2 pixelPosition;\nuniform vec2 pixelSize;\nvarying vec2 tc;\n\nvoid main() {\n  float tx = position.x * 0.5 + 0.5; //-1 -> 0, 1 -> 1\n  float ty = -position.y * 0.5 + 0.5; //-1 -> 1, 1 -> 0\n  //(x + 0)/sw * 2 - 1, (x + w)/sw * 2 - 1\n  float x = (pixelPosition.x + pixelSize.x * tx)/screenSize.x * 2.0 - 1.0;  //0 -> -1, 1 -> 1\n  //1.0 - (y + h)/sh * 2, 1.0 - (y + h)/sh * 2\n  float y = 1.0 - (pixelPosition.y + pixelSize.y * ty)/screenSize.y * 2.0;  //0 -> 1, 1 -> -1\n  gl_Position = vec4(x, y, 0.0, 1.0);\n  tc = texCoord;\n}\n\n#endif\n\n#ifdef FRAG\nuniform sampler2D Velocity;\nuniform sampler2D Obstacle;\nuniform float Viscosity;\nuniform float C;\nuniform int test;\nuniform float Width;\nuniform float Height;\nvarying vec2 tc;\n\nvoid v2TexNeighbors(sampler2D tex, vec2 st,\n    out vec2 left, out vec2 right, out vec2 bottom, out vec2 top, vec2 ts) {\n  left   = texture2D(tex, st - vec2(1, 0) / ts ).xy;\n  right  = texture2D(tex, st + vec2(1, 0) / ts ).xy;\n  bottom = texture2D(tex, st - vec2(0, 1) / ts ).xy;\n  top    = texture2D(tex, st + vec2(0, 1) / ts ).xy;\n\n}\n\nvoid fRoundTexNeighbors(sampler2D tex, vec2 st,\n    out float left, out float right, out float bottom, out float top, vec2 ts) {\n  left   = ceil(texture2D(tex, st - vec2(1, 0) / ts ).x - 0.5);\n  right  = ceil(texture2D(tex, st + vec2(1, 0) / ts ).x - 0.5);\n  bottom = ceil(texture2D(tex, st - vec2(0, 1) / ts ).x - 0.5);\n  top    = ceil(texture2D(tex, st + vec2(0, 1) / ts ).x - 0.5);\n\n}\n\nvoid main(){\n\n  vec2 texelSize = vec2(Width, Height);\n\n  vec2 vL; vec2 vR; vec2 vB; vec2 vT;\n  v2TexNeighbors (Velocity, tc, vL, vR, vB, vT, texelSize);\n  vec2 vC = texture2D(Velocity, tc).xy;\n\n  float oL; float oR; float oB; float oT;\n  fRoundTexNeighbors (Obstacle, tc, oL, oR, oB, oT, texelSize);\n  float inverseSolid = 1.0 - ceil(texture2D(Obstacle, tc).x - 0.5);\n\n  vL *= 1.0 - oL;\n  vR *= 1.0 - oR;\n  vB *= 1.0 - oB;\n  vT *= 1.0 - oT;\n  // ADD NEIGHBOR OBSTACLES;\n\n  vec2 newVel = ((vC + Viscosity * (vL + vR + vB + vT)) / C) * inverseSolid;\n\n  gl_FragColor = vec4(newVel, 0.0, 0.0);\n}\n\n#endif\n\n";
-var Vec2 = require('pex-geom').Vec2;
-
-function DiffuseShader (width, height) {
-  this.width = width || 512;
-  this.height = height || 512;
-  this._program = new Program(shader);
-}
-
-DiffuseShader.prototype.update = function (options) {
-  var destBuffer = options.destBuffer
-    , backBufferTex = options.backBufferTex
-    , obstacleTex = options.obstacleTex
-    , viscosity = options.viscosity
-    , frameRenderer = options.frameRenderer;
-
-  if (!destBuffer) throw new Error("no destBuffer");
-  if (!backBufferTex) throw new Error("no backBufferTex");
-  if (!obstacleTex) throw new Error("no obstacleTex");
-  //if (!viscosity) throw new Error("no viscosity");
-  if (!frameRenderer) throw new Error("no frameRenderer");
-
-  destBuffer.bind();
-  this._program.use();
-  //vert
-  this._program.uniforms.screenSize(new Vec2(this.width, this.height));
-  this._program.uniforms.pixelPosition(new Vec2(0, 0));
-  this._program.uniforms.pixelSize(new Vec2(this.width, this.height));
-  //frag
-  backBufferTex.bind(0);
-  this._program.uniforms.Velocity(0);
-  obstacleTex.bind(1);
-  this._program.uniforms.Obstacle(1);
-  this._program.uniforms.Width(this.width);
-  this._program.uniforms.Height(this.height);
-  this._program.uniforms.Viscosity(viscosity);
-  this._program.uniforms.C(1 + 4 * viscosity);
-  frameRenderer.draw(this._program);
-  destBuffer.unbind();
-
-}
-
-module.exports = DiffuseShader;
-
-
-
-},{"pex-geom":212,"pex-glu":230}],10:[function(require,module,exports){
-var glu = require('pex-glu');
-var Context = glu.Context;
-var Program = glu.Program;
-
-var shader  = "#ifdef VERT\n\nattribute vec2 position;\nattribute vec2 texCoord;\nuniform vec2 screenSize;\nuniform vec2 pixelPosition;\nuniform vec2 pixelSize;\nvarying vec2 tc;\n\nvoid main() {\n  float tx = position.x * 0.5 + 0.5; //-1 -> 0, 1 -> 1\n  float ty = -position.y * 0.5 + 0.5; //-1 -> 1, 1 -> 0\n  //(x + 0)/sw * 2 - 1, (x + w)/sw * 2 - 1\n  float x = (pixelPosition.x + pixelSize.x * tx)/screenSize.x * 2.0 - 1.0;  //0 -> -1, 1 -> 1\n  //1.0 - (y + h)/sh * 2, 1.0 - (y + h)/sh * 2\n  float y = 1.0 - (pixelPosition.y + pixelSize.y * ty)/screenSize.y * 2.0;  //0 -> 1, 1 -> -1\n  gl_Position = vec4(x, y, 0.0, 1.0);\n  tc = texCoord;\n}\n\n#endif\n\n#ifdef FRAG\n\nuniform sampler2D Velocity;\nuniform sampler2D Obstacle;\nuniform float HalfInverseCellSize;\nuniform float Width;\nuniform float Height;\nvarying vec2 tc;\n\nvoid v2TexNeighbors(sampler2D tex, vec2 st,\n    out vec2 left, out vec2 right, out vec2 bottom, out vec2 top, vec2 ts) {\n  left   = texture2D(tex, st - vec2(1, 0) / ts ).xy;\n  right  = texture2D(tex, st + vec2(1, 0) / ts ).xy;\n  bottom = texture2D(tex, st - vec2(0, 1) / ts ).xy;\n  top    = texture2D(tex, st + vec2(0, 1) / ts ).xy;\n}\n\nvoid fRoundTexNeighbors(sampler2D tex, vec2 st,\n    out float left, out float right, out float bottom, out float top, vec2 ts) {\n  left   = ceil(texture2D(tex, st - vec2(1, 0) / ts ).x - 0.5);\n  right  = ceil(texture2D(tex, st + vec2(1, 0) / ts ).x - 0.5);\n  bottom = ceil(texture2D(tex, st - vec2(0, 1) / ts ).x - 0.5);\n  top    = ceil(texture2D(tex, st + vec2(0, 1) / ts ).x - 0.5);\n}\n\nvoid main(){\n\n  vec2 texelSize = vec2(Width, Height);\n\n  vec2 vL; vec2 vR; vec2 vB; vec2 vT;\n  v2TexNeighbors (Velocity, tc, vL, vR, vB, vT, texelSize);\n  float oL; float oR; float oB; float oT;\n  fRoundTexNeighbors (Obstacle, tc, oL, oR, oB, oT, texelSize);\n\n  vL *= 1.0 - oL;\n  vR *= 1.0 - oR;\n  vB *= 1.0 - oB;\n  vT *= 1.0 - oT;\n\n  gl_FragColor.r = HalfInverseCellSize * (vR.x - vL.x + vT.y - vB.y);\n\n}\n\n#endif\n\n\n";
-var Vec2 = require('pex-geom').Vec2;
-
-function DivergenceShader (width, height) {
-  this.width = width || 512;
-  this.height = height || 512;
-  this._program = new Program(shader);
-}
-
-DivergenceShader.prototype.update = function (options) {
-  var destBuffer = options.destBuffer
-    , velocityTex = options.velocityTex
-    , obstacleTex = options.obstacleTex
-    , cellSize = options.cellSize
-    , frameRenderer = options.frameRenderer;
-
-  if (!destBuffer) throw new Error("no destBuffer");
-  if (!velocityTex) throw new Error("no velocityTex");
-  if (!obstacleTex) throw new Error("no obstacleTex");
-  if (!cellSize) throw new Error("no cellSize");
-  if (!frameRenderer) throw new Error("no frameRenderer");
-
-  destBuffer.bind();
-  this._program.use();
-  //vert
-  this._program.uniforms.screenSize(new Vec2(this.width, this.height));
-  this._program.uniforms.pixelPosition(new Vec2(0, 0));
-  this._program.uniforms.pixelSize(new Vec2(this.width, this.height));
-  //frag
-  velocityTex.bind(0);
-  this._program.uniforms.Velocity(0);
-  obstacleTex.bind(1);
-  this._program.uniforms.Obstacle(1);
-  this._program.uniforms.Width(this.width);
-  this._program.uniforms.Height(this.height);
-  this._program.uniforms.HalfInverseCellSize(0.5 / cellSize);
-  frameRenderer.draw(this._program);
-  destBuffer.unbind();
-
-}
-
-module.exports = DivergenceShader;
-
-},{"pex-geom":212,"pex-glu":230}],11:[function(require,module,exports){
-var glu = require('pex-glu');
-var Context = glu.Context;
-var Program = glu.Program;
-
-var shader  = "#ifdef VERT\n\nattribute vec2 position;\nattribute vec2 texCoord;\nuniform vec2 screenSize;\nuniform vec2 pixelPosition;\nuniform vec2 pixelSize;\nvarying vec2 tc;\n\nvoid main() {\n  float tx = position.x * 0.5 + 0.5; //-1 -> 0, 1 -> 1\n  float ty = -position.y * 0.5 + 0.5; //-1 -> 1, 1 -> 0\n  //(x + 0)/sw * 2 - 1, (x + w)/sw * 2 - 1\n  float x = (pixelPosition.x + pixelSize.x * tx)/screenSize.x * 2.0 - 1.0;  //0 -> -1, 1 -> 1\n  //1.0 - (y + h)/sh * 2, 1.0 - (y + h)/sh * 2\n  float y = 1.0 - (pixelPosition.y + pixelSize.y * ty)/screenSize.y * 2.0;  //0 -> 1, 1 -> -1\n  gl_Position = vec4(x, y, 0.0, 1.0);\n  tc = texCoord;\n}\n\n#endif\n\n#ifdef FRAG\n\nuniform sampler2D Pressure;\nuniform sampler2D Divergence;\nuniform sampler2D Obstacle;\nuniform float Alpha;\nuniform float Width;\nuniform float Height;\nvarying vec2 tc;\n//\t   uniform float InverseBeta = 0.25;\n\nvoid fTexNeighbors(sampler2D tex, vec2 st,\n    out float left, out float right, out float bottom, out float top, vec2 ts) {\n  //float texelSize = 1.0 / 512.0;\n  left   = texture2D(tex, st - vec2(1, 0) / ts ).x;\n  right  = texture2D(tex, st + vec2(1, 0) / ts ).x;\n  bottom = texture2D(tex, st - vec2(0, 1) / ts ).x;\n  top    = texture2D(tex, st + vec2(0, 1) / ts ).x;\n}\n\nvoid fRoundTexNeighbors(sampler2D tex, vec2 st,\n    out float left, out float right, out float bottom, out float top, vec2 ts) {\n  //float texelSize = 1.0 / 512.0;\n  left   = ceil(texture2D(tex, st - vec2(1, 0) / ts ).x - 0.5);\n  right  = ceil(texture2D(tex, st + vec2(1, 0) / ts ).x - 0.5);\n  bottom = ceil(texture2D(tex, st - vec2(0, 1) / ts ).x - 0.5);\n  top    = ceil(texture2D(tex, st + vec2(0, 1) / ts ).x - 0.5);\n}\n\nvoid main() {\n\n  vec2 texelSize = vec2(Width, Height);\n\n  float pL; float pR; float pB; float pT;\n  fTexNeighbors (Pressure, tc, pL, pR, pB, pT, texelSize);\n  float pC = texture2D(Pressure, tc).x;\n\n  float oL; float oR; float oB; float oT;\n  fRoundTexNeighbors (Obstacle, tc, oL, oR, oB, oT, texelSize);\n\n  float bC = texture2D(Divergence, tc ).x;\n\n  pL = pL * (1.0 - oL) + pC * oL;\n  pR = pR * (1.0 - oR) + pC * oR;\n  pB = pB * (1.0 - oB) + pC * oB;\n  pT = pT * (1.0 - oT) + pC * oT;\n\n\n  gl_FragColor = vec4((pL + pR + pB + pT + Alpha * bC) * 0.25, 0.0,0.0,0.0);\n}\n\n#endif\n\n\n\n";
-var Vec2 = require('pex-geom').Vec2;
-
-function JacobiShader (width, height) {
-  this.width = width || 512;
-  this.height = height || 512;
-  this._program = new Program(shader);
-}
-
-JacobiShader.prototype.update = function (options) {
-  var destBuffer = options.destBuffer
-    , backBufferTex = options.backBufferTex
-    , obstacleTex = options.obstacleTex
-    , divergenceTex = options.divergenceTex
-    , cellSize = options.cellSize
-    , frameRenderer = options.frameRenderer;
-
-  if (!destBuffer) throw new Error("no destBuffer");
-  if (!backBufferTex) throw new Error("no backBufferTex");
-  if (!obstacleTex) throw new Error("no obstacleTex");
-  if (!divergenceTex) throw new Error("no divergenceTex");
-  if (!frameRenderer) throw new Error("no frameRenderer");
-
-  destBuffer.bind();
-  this._program.use();
-  //vert
-  this._program.uniforms.screenSize(new Vec2(this.width, this.height));
-  this._program.uniforms.pixelPosition(new Vec2(0, 0));
-  this._program.uniforms.pixelSize(new Vec2(this.width, this.height));
-  //frag
-  backBufferTex.bind(0);
-  this._program.uniforms.Pressure(0);
-  divergenceTex.bind(1);
-  this._program.uniforms.Divergence(1);
-  obstacleTex.bind(2);
-  this._program.uniforms.Obstacle(2);
-  this._program.uniforms.Width(this.width);
-  this._program.uniforms.Height(this.height);
-  this._program.uniforms.Alpha(-cellSize * cellSize);
-  frameRenderer.draw(this._program);
-  destBuffer.unbind();
-
-}
-
-module.exports = JacobiShader;
-
-
-},{"pex-geom":212,"pex-glu":230}],12:[function(require,module,exports){
-var glu = require('pex-glu');
-var Context = glu.Context;
-var Program = glu.Program;
-
-var shader = "#ifdef VERT\n\nattribute vec2 position;\nattribute vec2 texCoord;\nuniform vec2 screenSize;\nuniform vec2 pixelPosition;\nuniform vec2 pixelSize;\nvarying vec2 tc;\n\nvoid main() {\n  float tx = position.x * 0.5 + 0.5; //-1 -> 0, 1 -> 1\n  float ty = -position.y * 0.5 + 0.5; //-1 -> 1, 1 -> 0\n  //(x + 0)/sw * 2 - 1, (x + w)/sw * 2 - 1\n  float x = (pixelPosition.x + pixelSize.x * tx)/screenSize.x * 2.0 - 1.0;  //0 -> -1, 1 -> 1\n  //1.0 - (y + h)/sh * 2, 1.0 - (y + h)/sh * 2\n  float y = 1.0 - (pixelPosition.y + pixelSize.y * ty)/screenSize.y * 2.0;  //0 -> 1, 1 -> -1\n  gl_Position = vec4(x, y, 0.0, 1.0);\n  tc = texCoord;\n}\n\n#endif\n\n#ifdef FRAG\n\nuniform sampler2D Velocity;\nuniform sampler2D Pressure;\nuniform sampler2D Obstacle;\nuniform float Width;\nuniform float Height;\nuniform float HalfInverseCellSize;\nvarying vec2 tc;\n\nvoid fTexNeighbors(sampler2D tex, vec2 st,\n    out float left, out float right, out float bottom, out float top, vec2 ts) {\n  float texelSize = 1.0 / 512.0;\n  left   = texture2D(tex, st - vec2(1, 0) / ts ).x;\n  right  = texture2D(tex, st + vec2(1, 0) / ts ).x;\n  bottom = texture2D(tex, st - vec2(0, 1) / ts ).x;\n  top    = texture2D(tex, st + vec2(0, 1) / ts ).x;\n}\n\nvoid main(){\n\n  vec2 texelSize = vec2(Width, Height);\n\n  float pL; float pR; float pB; float pT;\n  fTexNeighbors (Pressure, tc, pL, pR, pB, pT, texelSize);\n  float pC = texture2D(Pressure, tc).x;\n\n  float oL; float oR; float oB; float oT;\n  fTexNeighbors (Obstacle, tc, oL, oR, oB, oT, texelSize);\n\n  vec2 vMask = vec2(1.0,1.0);\n\n  if (oL > 0.9) { pL = pC; vMask.x = 0.0; }\n  if (oR > 0.9) { pR = pC; vMask.x = 0.0; }\n  if (oB > 0.9) { pB = pC; vMask.y = 0.0; }\n  if (oT > 0.9) { pT = pC; vMask.y = 0.0; }\n\n  vec2 oldV = texture2D(Velocity, tc).xy;\n  vec2 grad = vec2(pR - pL, pT - pB) * HalfInverseCellSize;\n  vec2 newV = oldV - grad;\n\n  gl_FragColor = vec4((vMask * newV), 0.0, 0.0);\n}\n\n#endif\n\n\n\n\n";
-var Vec2 = require('pex-geom').Vec2;
-
-function SubstractGradientShader (width, height) {
-  this.width = width || 512;
-  this.height = height || 512;
-  this._program = new Program(shader);
-}
-
-SubstractGradientShader.prototype.update = function (options) {
-  var destBuffer = options.destBuffer
-    , backBufferTex = options.backBufferTex
-    , pressureTex = options.pressureTex
-    , obstacleTex = options.obstacleTex
-    , cellSize = options.cellSize
-    , frameRenderer = options.frameRenderer;
-
-  if (!destBuffer) throw new Error("no destBuffer");
-  if (!backBufferTex) throw new Error("no backBufferTex");
-  if (!pressureTex) throw new Error("no pressureTex");
-  if (!obstacleTex) throw new Error("no obstacleTex");
-  if (!cellSize) throw new Error("no cellSize");
-  if (!frameRenderer) throw new Error("no frameRenderer");
-
-  destBuffer.bind();
-  this._program.use();
-  //vert
-  this._program.uniforms.screenSize(new Vec2(this.width, this.height));
-  this._program.uniforms.pixelPosition(new Vec2(0, 0));
-  this._program.uniforms.pixelSize(new Vec2(this.width, this.height));
-  //frag
-  backBufferTex.bind(0);
-  this._program.uniforms.Velocity(0);
-  pressureTex.bind(1);
-  this._program.uniforms.Pressure(1);
-  obstacleTex.bind(2);
-  this._program.uniforms.Obstacle(2);
-  this._program.uniforms.Width(this.width);
-  this._program.uniforms.Height(this.height);
-  this._program.uniforms.HalfInverseCellSize(0.5 / cellSize);
-  frameRenderer.draw(this._program);
-  destBuffer.unbind();
-
-}
-
-module.exports = SubstractGradientShader;
-
-
-},{"pex-geom":212,"pex-glu":230}],13:[function(require,module,exports){
-//http://www.clicktorelease.com/blog/creating-spherical-environment-mapping-shader
-
-var glu = require('pex-glu');
-var color = require('pex-color');
-var Context = glu.Context;
-var Material = glu.Material;
-var Program = glu.Program;
-var Color = color.Color;
-var merge = require('merge');
-
-
-var DisplacedMatCapGLSL = "#ifdef VERT\n\nuniform mat4 projectionMatrix;\nuniform mat4 modelViewMatrix;\nuniform mat4 normalMatrix;\nuniform float time;\nuniform float pointSize;\nattribute vec3 position;\nattribute vec3 normal;\nattribute vec2 texCoord;\n\nvarying vec3 e;\nvarying vec3 n;\nvarying vec3 p;\n\nuniform sampler2D displacementMap;\nuniform float displacementHeight;\nuniform vec2 textureSize;\nuniform vec2 planeSize;\nuniform float numSteps;\n\n\nvoid main() {\n    vec3 pos = position;\n    float height = displacementHeight * texture2D(displacementMap, texCoord).r;\n\n    float heightRight =\n                  displacementHeight *\n                  texture2D(displacementMap, texCoord + vec2(2.0/textureSize.x, 0.0)).r;\n\n    float heightFront =\n                  displacementHeight *\n                  texture2D(displacementMap, texCoord + vec2(0.0, 2.0/textureSize.y)).r;\n\n    vec3 right =\n              normalize(vec3(2.0*planeSize.x/numSteps, heightRight, 0.0) -\n              vec3(0.0, height, 0.0));\n\n    vec3 front =\n              normalize(vec3(0.0, heightFront, 2.0*planeSize.y/numSteps) -\n              vec3(0.0, height, 0.0));\n\n    vec3 up = normalize(cross(right, -front));\n\n    vec3 N = up;\n\n    pos.z += height * 5.0;\n    pos.z = log2(pos.z * 50.0) / 20.0;\n    gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);\n\n    n = normalize(vec3(normalMatrix * vec4(N, 1.0)));\n    p = pos;\n}\n\n#endif\n\n#ifdef FRAG\n\nuniform float zTreshold;\nuniform sampler2D texture;\nvarying vec3 n;\nvarying vec3 p;\n\nvoid main() {\n    vec3 r = n;\n    float m = 2.0 * sqrt(r.x * r.x + r.y * r.y + (r.z + 1.0) * (r.z + 1.0));\n    vec2 N = r.xy / m + 0.5;\n    vec3 base = texture2D( texture, N ).rgb;\n\n    gl_FragColor = vec4( base, 1.0 );\n    gl_FragColor.w = p.z * p.z * 30.0;\n\n    if (p.z < zTreshold) discard;\n}\n#endif\n";
-
-function DisplacedMatCap(uniforms) {
-  this.gl = Context.currentContext;
-  var program = new Program(DisplacedMatCapGLSL);
-  var defaults = {};
-  uniforms = merge(defaults, uniforms);
-  Material.call(this, program, uniforms);
-}
-
-DisplacedMatCap.prototype = Object.create(Material.prototype);
-
-module.exports = DisplacedMatCap;
-
-},{"merge":176,"pex-color":177,"pex-glu":230}],14:[function(require,module,exports){
-
-},{}],15:[function(require,module,exports){
+},{}],3:[function(require,module,exports){
 /*!
  * The buffer module from node.js, for the browser.
  *
@@ -2714,7 +1904,7 @@ function decodeUtf8Char (str) {
   }
 }
 
-},{"base64-js":16,"ieee754":17,"is-array":18}],16:[function(require,module,exports){
+},{"base64-js":4,"ieee754":5,"is-array":6}],4:[function(require,module,exports){
 var lookup = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 
 ;(function (exports) {
@@ -2840,7 +2030,7 @@ var lookup = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 	exports.fromByteArray = uint8ToBase64
 }(typeof exports === 'undefined' ? (this.base64js = {}) : exports))
 
-},{}],17:[function(require,module,exports){
+},{}],5:[function(require,module,exports){
 exports.read = function(buffer, offset, isLE, mLen, nBytes) {
   var e, m,
       eLen = nBytes * 8 - mLen - 1,
@@ -2926,7 +2116,7 @@ exports.write = function(buffer, value, offset, isLE, mLen, nBytes) {
   buffer[offset + i - d] |= s * 128;
 };
 
-},{}],18:[function(require,module,exports){
+},{}],6:[function(require,module,exports){
 
 /**
  * isArray
@@ -2961,7 +2151,7 @@ module.exports = isArray || function (val) {
   return !! val && '[object Array]' == str.call(val);
 };
 
-},{}],19:[function(require,module,exports){
+},{}],7:[function(require,module,exports){
 'use strict';
 
 exports.randomBytes = exports.rng = exports.pseudoRandomBytes = exports.prng = require('randombytes')
@@ -3042,7 +2232,7 @@ var publicEncrypt = require('public-encrypt');
   }
 })
 
-},{"browserify-aes":23,"browserify-sign":39,"browserify-sign/algos":38,"create-ecdh":85,"create-hash":107,"create-hmac":119,"diffie-hellman":120,"pbkdf2":127,"public-encrypt":128,"randombytes":155}],20:[function(require,module,exports){
+},{"browserify-aes":11,"browserify-sign":27,"browserify-sign/algos":26,"create-ecdh":73,"create-hash":95,"create-hmac":107,"diffie-hellman":108,"pbkdf2":115,"public-encrypt":116,"randombytes":143}],8:[function(require,module,exports){
 (function (Buffer){
 var md5 = require('create-hash/md5');
 module.exports = EVP_BytesToKey;
@@ -3107,7 +2297,7 @@ function EVP_BytesToKey(password, keyLen, ivLen) {
   };
 }
 }).call(this,require("buffer").Buffer)
-},{"buffer":15,"create-hash/md5":109}],21:[function(require,module,exports){
+},{"buffer":3,"create-hash/md5":97}],9:[function(require,module,exports){
 (function (Buffer){
 // based on the aes implimentation in triple sec
 // https://github.com/keybase/triplesec
@@ -3308,7 +2498,7 @@ AES.prototype._doCryptBlock = function(M, keySchedule, SUB_MIX, SBOX) {
 
   exports.AES = AES;
 }).call(this,require("buffer").Buffer)
-},{"buffer":15}],22:[function(require,module,exports){
+},{"buffer":3}],10:[function(require,module,exports){
 (function (Buffer){
 var aes = require('./aes');
 var Transform = require('./cipherBase');
@@ -3411,7 +2601,7 @@ function xorTest(a, b) {
 
 
 }).call(this,require("buffer").Buffer)
-},{"./aes":21,"./cipherBase":24,"./ghash":27,"./xor":37,"buffer":15,"inherits":157}],23:[function(require,module,exports){
+},{"./aes":9,"./cipherBase":12,"./ghash":15,"./xor":25,"buffer":3,"inherits":145}],11:[function(require,module,exports){
 var ciphers = require('./encrypter');
 exports.createCipher = exports.Cipher = ciphers.createCipher;
 exports.createCipheriv = exports.Cipheriv = ciphers.createCipheriv;
@@ -3424,7 +2614,7 @@ function getCiphers () {
 }
 exports.listCiphers = exports.getCiphers = getCiphers;
 
-},{"./decrypter":25,"./encrypter":26,"./modes":28}],24:[function(require,module,exports){
+},{"./decrypter":13,"./encrypter":14,"./modes":16}],12:[function(require,module,exports){
 (function (Buffer){
 var Transform = require('stream').Transform;
 var inherits = require('inherits');
@@ -3464,7 +2654,7 @@ CipherBase.prototype.final = function (outputEnc) {
   return outData;
 };
 }).call(this,require("buffer").Buffer)
-},{"buffer":15,"inherits":157,"stream":172}],25:[function(require,module,exports){
+},{"buffer":3,"inherits":145,"stream":160}],13:[function(require,module,exports){
 (function (Buffer){
 var aes = require('./aes');
 var Transform = require('./cipherBase');
@@ -3604,7 +2794,7 @@ function createDecipher (suite, password) {
 exports.createDecipher = createDecipher;
 exports.createDecipheriv = createDecipheriv;
 }).call(this,require("buffer").Buffer)
-},{"./EVP_BytesToKey":20,"./aes":21,"./authCipher":22,"./cipherBase":24,"./modes":28,"./modes/cbc":29,"./modes/cfb":30,"./modes/cfb1":31,"./modes/cfb8":32,"./modes/ctr":33,"./modes/ecb":34,"./modes/ofb":35,"./streamCipher":36,"buffer":15,"inherits":157}],26:[function(require,module,exports){
+},{"./EVP_BytesToKey":8,"./aes":9,"./authCipher":10,"./cipherBase":12,"./modes":16,"./modes/cbc":17,"./modes/cfb":18,"./modes/cfb1":19,"./modes/cfb8":20,"./modes/ctr":21,"./modes/ecb":22,"./modes/ofb":23,"./streamCipher":24,"buffer":3,"inherits":145}],14:[function(require,module,exports){
 (function (Buffer){
 var aes = require('./aes');
 var Transform = require('./cipherBase');
@@ -3728,7 +2918,7 @@ function createCipher (suite, password) {
 exports.createCipheriv = createCipheriv;
 exports.createCipher = createCipher;
 }).call(this,require("buffer").Buffer)
-},{"./EVP_BytesToKey":20,"./aes":21,"./authCipher":22,"./cipherBase":24,"./modes":28,"./modes/cbc":29,"./modes/cfb":30,"./modes/cfb1":31,"./modes/cfb8":32,"./modes/ctr":33,"./modes/ecb":34,"./modes/ofb":35,"./streamCipher":36,"buffer":15,"inherits":157}],27:[function(require,module,exports){
+},{"./EVP_BytesToKey":8,"./aes":9,"./authCipher":10,"./cipherBase":12,"./modes":16,"./modes/cbc":17,"./modes/cfb":18,"./modes/cfb1":19,"./modes/cfb8":20,"./modes/ctr":21,"./modes/ecb":22,"./modes/ofb":23,"./streamCipher":24,"buffer":3,"inherits":145}],15:[function(require,module,exports){
 (function (Buffer){
 var zeros = new Buffer(16);
 zeros.fill(0);
@@ -3829,7 +3019,7 @@ function xor(a, b) {
   ];
 }
 }).call(this,require("buffer").Buffer)
-},{"buffer":15}],28:[function(require,module,exports){
+},{"buffer":3}],16:[function(require,module,exports){
 exports['aes-128-ecb'] = {
   cipher: 'AES',
   key: 128,
@@ -4001,7 +3191,7 @@ exports['aes-256-gcm'] = {
   mode: 'GCM',
   type: 'auth'
 };
-},{}],29:[function(require,module,exports){
+},{}],17:[function(require,module,exports){
 var xor = require('../xor');
 exports.encrypt = function (self, block) {
   var data = xor(block, self._prev);
@@ -4014,7 +3204,7 @@ exports.decrypt = function (self, block) {
   var out = self._cipher.decryptBlock(block);
   return xor(out, pad);
 };
-},{"../xor":37}],30:[function(require,module,exports){
+},{"../xor":25}],18:[function(require,module,exports){
 (function (Buffer){
 var xor = require('../xor');
 exports.encrypt = function (self, data, decrypt) {
@@ -4044,7 +3234,7 @@ function encryptStart(self, data, decrypt) {
   return out;
 }
 }).call(this,require("buffer").Buffer)
-},{"../xor":37,"buffer":15}],31:[function(require,module,exports){
+},{"../xor":25,"buffer":3}],19:[function(require,module,exports){
 (function (Buffer){
 
 function encryptByte(self, byte, decrypt) {
@@ -4082,7 +3272,7 @@ function shiftIn(buffer, value) {
   return out;
 }
 }).call(this,require("buffer").Buffer)
-},{"buffer":15}],32:[function(require,module,exports){
+},{"buffer":3}],20:[function(require,module,exports){
 (function (Buffer){
 function encryptByte(self, byte, decrypt) {
   var pad = self._cipher.encryptBlock(self._prev);
@@ -4100,7 +3290,7 @@ exports.encrypt = function (self, chunk, decrypt) {
   return out;
 };
 }).call(this,require("buffer").Buffer)
-},{"buffer":15}],33:[function(require,module,exports){
+},{"buffer":3}],21:[function(require,module,exports){
 (function (Buffer){
 var xor = require('../xor');
 function getBlock(self) {
@@ -4131,14 +3321,14 @@ function incr32(iv) {
   }
 }
 }).call(this,require("buffer").Buffer)
-},{"../xor":37,"buffer":15}],34:[function(require,module,exports){
+},{"../xor":25,"buffer":3}],22:[function(require,module,exports){
 exports.encrypt = function (self, block) {
   return self._cipher.encryptBlock(block);
 };
 exports.decrypt = function (self, block) {
   return self._cipher.decryptBlock(block);
 };
-},{}],35:[function(require,module,exports){
+},{}],23:[function(require,module,exports){
 (function (Buffer){
 var xor = require('../xor');
 function getBlock(self) {
@@ -4154,7 +3344,7 @@ exports.encrypt = function (self, chunk) {
   return xor(chunk, pad);
 };
 }).call(this,require("buffer").Buffer)
-},{"../xor":37,"buffer":15}],36:[function(require,module,exports){
+},{"../xor":25,"buffer":3}],24:[function(require,module,exports){
 (function (Buffer){
 var aes = require('./aes');
 var Transform = require('./cipherBase');
@@ -4182,7 +3372,7 @@ StreamCipher.prototype._final = function () {
   this._cipher.scrub();
 };
 }).call(this,require("buffer").Buffer)
-},{"./aes":21,"./cipherBase":24,"buffer":15,"inherits":157}],37:[function(require,module,exports){
+},{"./aes":9,"./cipherBase":12,"buffer":3,"inherits":145}],25:[function(require,module,exports){
 (function (Buffer){
 module.exports = xor;
 function xor(a, b) {
@@ -4195,7 +3385,7 @@ function xor(a, b) {
   return out;
 }
 }).call(this,require("buffer").Buffer)
-},{"buffer":15}],38:[function(require,module,exports){
+},{"buffer":3}],26:[function(require,module,exports){
 (function (Buffer){
 'use strict'
 exports['RSA-SHA224'] = exports.sha224WithRSAEncryption = {
@@ -4270,7 +3460,7 @@ exports['RSA-MD5'] = exports.md5WithRSAEncryption = {
 }
 
 }).call(this,require("buffer").Buffer)
-},{"buffer":15}],39:[function(require,module,exports){
+},{"buffer":3}],27:[function(require,module,exports){
 (function (Buffer){
 'use strict'
 var sign = require('./sign')
@@ -4367,7 +3557,7 @@ Verify.prototype.verify = function verifyMethod (key, sig, enc) {
 }
 
 }).call(this,require("buffer").Buffer)
-},{"./algos":38,"./sign":82,"./verify":83,"buffer":15,"create-hash":107,"inherits":157,"stream":172}],40:[function(require,module,exports){
+},{"./algos":26,"./sign":70,"./verify":71,"buffer":3,"create-hash":95,"inherits":145,"stream":160}],28:[function(require,module,exports){
 'use strict'
 exports['1.3.132.0.10'] = 'secp256k1'
 
@@ -4377,7 +3567,7 @@ exports['1.2.840.10045.3.1.1'] = 'p192'
 
 exports['1.2.840.10045.3.1.7'] = 'p256'
 
-},{}],41:[function(require,module,exports){
+},{}],29:[function(require,module,exports){
 (function(module, exports) {
 
 'use strict';
@@ -6512,7 +5702,7 @@ Mont.prototype.invm = function invm(a) {
 
 })(typeof module === 'undefined' || module, this);
 
-},{}],42:[function(require,module,exports){
+},{}],30:[function(require,module,exports){
 (function (Buffer){
 var bn = require('bn.js');
 var randomBytes = require('randombytes');
@@ -6561,7 +5751,7 @@ function getr(priv) {
   return r;
 }
 }).call(this,require("buffer").Buffer)
-},{"bn.js":41,"buffer":15,"randombytes":155}],43:[function(require,module,exports){
+},{"bn.js":29,"buffer":3,"randombytes":143}],31:[function(require,module,exports){
 var elliptic = exports;
 
 elliptic.version = require('../package.json').version;
@@ -6574,7 +5764,7 @@ elliptic.curves = require('./elliptic/curves');
 // Protocols
 elliptic.ec = require('./elliptic/ec');
 
-},{"../package.json":62,"./elliptic/curve":46,"./elliptic/curves":49,"./elliptic/ec":50,"./elliptic/hmac-drbg":53,"./elliptic/utils":54,"brorand":55}],44:[function(require,module,exports){
+},{"../package.json":50,"./elliptic/curve":34,"./elliptic/curves":37,"./elliptic/ec":38,"./elliptic/hmac-drbg":41,"./elliptic/utils":42,"brorand":43}],32:[function(require,module,exports){
 var bn = require('bn.js');
 var elliptic = require('../../elliptic');
 
@@ -6878,7 +6068,7 @@ BasePoint.prototype.dblp = function dblp(k) {
   return r;
 };
 
-},{"../../elliptic":43,"bn.js":41}],45:[function(require,module,exports){
+},{"../../elliptic":31,"bn.js":29}],33:[function(require,module,exports){
 var curve = require('../curve');
 var elliptic = require('../../elliptic');
 var bn = require('bn.js');
@@ -7241,7 +6431,7 @@ Point.prototype.getY = function getY() {
 Point.prototype.toP = Point.prototype.normalize;
 Point.prototype.mixedAdd = Point.prototype.add;
 
-},{"../../elliptic":43,"../curve":46,"bn.js":41,"inherits":157}],46:[function(require,module,exports){
+},{"../../elliptic":31,"../curve":34,"bn.js":29,"inherits":145}],34:[function(require,module,exports){
 var curve = exports;
 
 curve.base = require('./base');
@@ -7249,7 +6439,7 @@ curve.short = require('./short');
 curve.mont = require('./mont');
 curve.edwards = require('./edwards');
 
-},{"./base":44,"./edwards":45,"./mont":47,"./short":48}],47:[function(require,module,exports){
+},{"./base":32,"./edwards":33,"./mont":35,"./short":36}],35:[function(require,module,exports){
 var curve = require('../curve');
 var elliptic = require('../../elliptic');
 var bn = require('bn.js');
@@ -7414,7 +6604,7 @@ Point.prototype.getX = function getX() {
   return this.x.fromRed();
 };
 
-},{"../../elliptic":43,"../curve":46,"bn.js":41,"inherits":157}],48:[function(require,module,exports){
+},{"../../elliptic":31,"../curve":34,"bn.js":29,"inherits":145}],36:[function(require,module,exports){
 var curve = require('../curve');
 var elliptic = require('../../elliptic');
 var bn = require('bn.js');
@@ -8312,7 +7502,7 @@ JPoint.prototype.isInfinity = function isInfinity() {
   return this.z.cmpn(0) === 0;
 };
 
-},{"../../elliptic":43,"../curve":46,"bn.js":41,"inherits":157}],49:[function(require,module,exports){
+},{"../../elliptic":31,"../curve":34,"bn.js":29,"inherits":145}],37:[function(require,module,exports){
 var curves = exports;
 
 var hash = require('hash.js');
@@ -9242,7 +8432,7 @@ defineCurve('secp256k1', {
   ]
 });
 
-},{"../elliptic":43,"bn.js":41,"hash.js":56}],50:[function(require,module,exports){
+},{"../elliptic":31,"bn.js":29,"hash.js":44}],38:[function(require,module,exports){
 var bn = require('bn.js');
 var elliptic = require('../../elliptic');
 var utils = elliptic.utils;
@@ -9395,7 +8585,7 @@ EC.prototype.verify = function verify(msg, signature, key) {
   return p.getX().mod(this.n).cmp(r) === 0;
 };
 
-},{"../../elliptic":43,"./key":51,"./signature":52,"bn.js":41}],51:[function(require,module,exports){
+},{"../../elliptic":31,"./key":39,"./signature":40,"bn.js":29}],39:[function(require,module,exports){
 var bn = require('bn.js');
 
 var elliptic = require('../../elliptic');
@@ -9541,7 +8731,7 @@ KeyPair.prototype.inspect = function inspect() {
          ' pub: ' + (this.pub && this.pub.inspect()) + ' >';
 };
 
-},{"../../elliptic":43,"bn.js":41}],52:[function(require,module,exports){
+},{"../../elliptic":31,"bn.js":29}],40:[function(require,module,exports){
 var bn = require('bn.js');
 
 var elliptic = require('../../elliptic');
@@ -9606,7 +8796,7 @@ Signature.prototype.toDER = function toDER(enc) {
   return utils.encode(res, enc);
 };
 
-},{"../../elliptic":43,"bn.js":41}],53:[function(require,module,exports){
+},{"../../elliptic":31,"bn.js":29}],41:[function(require,module,exports){
 var hash = require('hash.js');
 var elliptic = require('../elliptic');
 var utils = elliptic.utils;
@@ -9720,7 +8910,7 @@ HmacDRBG.prototype.generate = function generate(len, enc, add, addEnc) {
   return utils.encode(res, enc);
 };
 
-},{"../elliptic":43,"hash.js":56}],54:[function(require,module,exports){
+},{"../elliptic":31,"hash.js":44}],42:[function(require,module,exports){
 var bn = require('bn.js');
 
 var utils = exports;
@@ -9872,7 +9062,7 @@ function getJSF(k1, k2) {
 }
 utils.getJSF = getJSF;
 
-},{"bn.js":41}],55:[function(require,module,exports){
+},{"bn.js":29}],43:[function(require,module,exports){
 var r;
 
 module.exports = function rand(len) {
@@ -9931,7 +9121,7 @@ if (typeof window === 'object') {
   }
 }
 
-},{}],56:[function(require,module,exports){
+},{}],44:[function(require,module,exports){
 var hash = exports;
 
 hash.utils = require('./hash/utils');
@@ -9948,7 +9138,7 @@ hash.sha384 = hash.sha.sha384;
 hash.sha512 = hash.sha.sha512;
 hash.ripemd160 = hash.ripemd.ripemd160;
 
-},{"./hash/common":57,"./hash/hmac":58,"./hash/ripemd":59,"./hash/sha":60,"./hash/utils":61}],57:[function(require,module,exports){
+},{"./hash/common":45,"./hash/hmac":46,"./hash/ripemd":47,"./hash/sha":48,"./hash/utils":49}],45:[function(require,module,exports){
 var hash = require('../hash');
 var utils = hash.utils;
 var assert = utils.assert;
@@ -10041,7 +9231,7 @@ BlockHash.prototype._pad = function pad() {
   return res;
 };
 
-},{"../hash":56}],58:[function(require,module,exports){
+},{"../hash":44}],46:[function(require,module,exports){
 var hmac = exports;
 
 var hash = require('../hash');
@@ -10091,7 +9281,7 @@ Hmac.prototype.digest = function digest(enc) {
   return this.outer.digest(enc);
 };
 
-},{"../hash":56}],59:[function(require,module,exports){
+},{"../hash":44}],47:[function(require,module,exports){
 var hash = require('../hash');
 var utils = hash.utils;
 
@@ -10237,7 +9427,7 @@ var sh = [
   8, 5, 12, 9, 12, 5, 14, 6, 8, 13, 6, 5, 15, 13, 11, 11
 ];
 
-},{"../hash":56}],60:[function(require,module,exports){
+},{"../hash":44}],48:[function(require,module,exports){
 var hash = require('../hash');
 var utils = hash.utils;
 var assert = utils.assert;
@@ -10803,7 +9993,7 @@ function g1_512_lo(xh, xl) {
   return r;
 }
 
-},{"../hash":56}],61:[function(require,module,exports){
+},{"../hash":44}],49:[function(require,module,exports){
 var utils = exports;
 var inherits = require('inherits');
 
@@ -11062,7 +10252,7 @@ function shr64_lo(ah, al, num) {
 };
 exports.shr64_lo = shr64_lo;
 
-},{"inherits":157}],62:[function(require,module,exports){
+},{"inherits":145}],50:[function(require,module,exports){
 module.exports={
   "name": "elliptic",
   "version": "1.0.1",
@@ -11125,7 +10315,7 @@ module.exports={
   "readme": "ERROR: No README data found!"
 }
 
-},{}],63:[function(require,module,exports){
+},{}],51:[function(require,module,exports){
 (function (Buffer){
 var createHash = require('create-hash');
 module.exports = function evp(password, salt, keyLen) {
@@ -11167,7 +10357,7 @@ module.exports = function evp(password, salt, keyLen) {
   return key;
 };
 }).call(this,require("buffer").Buffer)
-},{"buffer":15,"create-hash":107}],64:[function(require,module,exports){
+},{"buffer":3,"create-hash":95}],52:[function(require,module,exports){
 module.exports={"2.16.840.1.101.3.4.1.1": "aes-128-ecb",
 "2.16.840.1.101.3.4.1.2": "aes-128-cbc",
 "2.16.840.1.101.3.4.1.3": "aes-128-ofb",
@@ -11181,7 +10371,7 @@ module.exports={"2.16.840.1.101.3.4.1.1": "aes-128-ecb",
 "2.16.840.1.101.3.4.1.43": "aes-256-ofb",
 "2.16.840.1.101.3.4.1.44": "aes-256-cfb"
 }
-},{}],65:[function(require,module,exports){
+},{}],53:[function(require,module,exports){
 // from https://github.com/indutny/self-signed/blob/gh-pages/lib/asn1.js
 // Fedor, you are amazing.
 
@@ -11300,7 +10490,7 @@ exports.signature = asn1.define('signature', function() {
   );
 });
 
-},{"asn1.js":68}],66:[function(require,module,exports){
+},{"asn1.js":56}],54:[function(require,module,exports){
 (function (Buffer){
 // adapted from https://github.com/apatil/pemstrip
 var findProc = /Proc-Type: 4,ENCRYPTED\n\r?DEK-Info: AES-((?:128)|(?:192)|(?:256))-CBC,([0-9A-H]+)\n\r?\n\r?([0-9A-z\n\r\+\/\=]+)\n\r?/m;
@@ -11348,7 +10538,7 @@ function wrap(str) {
   return chunks.join("\n");
 }
 }).call(this,require("buffer").Buffer)
-},{"./EVP_BytesToKey":63,"browserify-aes":23,"buffer":15}],67:[function(require,module,exports){
+},{"./EVP_BytesToKey":51,"browserify-aes":11,"buffer":3}],55:[function(require,module,exports){
 (function (Buffer){
 var asn1 = require('./asn1');
 var aesid = require('./aesid.json');
@@ -11452,7 +10642,7 @@ function decrypt(data, password) {
   return Buffer.concat(out);
 }
 }).call(this,require("buffer").Buffer)
-},{"./aesid.json":64,"./asn1":65,"./fixProc":66,"browserify-aes":23,"buffer":15,"pbkdf2-compat":81}],68:[function(require,module,exports){
+},{"./aesid.json":52,"./asn1":53,"./fixProc":54,"browserify-aes":11,"buffer":3,"pbkdf2-compat":69}],56:[function(require,module,exports){
 var asn1 = exports;
 
 asn1.bignum = require('bn.js');
@@ -11463,7 +10653,7 @@ asn1.constants = require('./asn1/constants');
 asn1.decoders = require('./asn1/decoders');
 asn1.encoders = require('./asn1/encoders');
 
-},{"./asn1/api":69,"./asn1/base":71,"./asn1/constants":75,"./asn1/decoders":77,"./asn1/encoders":79,"bn.js":41}],69:[function(require,module,exports){
+},{"./asn1/api":57,"./asn1/base":59,"./asn1/constants":63,"./asn1/decoders":65,"./asn1/encoders":67,"bn.js":29}],57:[function(require,module,exports){
 var asn1 = require('../asn1');
 var inherits = require('inherits');
 
@@ -11524,7 +10714,7 @@ Entity.prototype.encode = function encode(data, enc, /* internal */ reporter) {
   return this._getEncoder(enc).encode(data, reporter);
 };
 
-},{"../asn1":68,"inherits":157,"vm":174}],70:[function(require,module,exports){
+},{"../asn1":56,"inherits":145,"vm":162}],58:[function(require,module,exports){
 var inherits = require('inherits');
 var Reporter = require('../base').Reporter;
 var Buffer = require('buffer').Buffer;
@@ -11641,7 +10831,7 @@ EncoderBuffer.prototype.join = function join(out, offset) {
   return out;
 };
 
-},{"../base":71,"buffer":15,"inherits":157}],71:[function(require,module,exports){
+},{"../base":59,"buffer":3,"inherits":145}],59:[function(require,module,exports){
 var base = exports;
 
 base.Reporter = require('./reporter').Reporter;
@@ -11649,7 +10839,7 @@ base.DecoderBuffer = require('./buffer').DecoderBuffer;
 base.EncoderBuffer = require('./buffer').EncoderBuffer;
 base.Node = require('./node');
 
-},{"./buffer":70,"./node":72,"./reporter":73}],72:[function(require,module,exports){
+},{"./buffer":58,"./node":60,"./reporter":61}],60:[function(require,module,exports){
 var Reporter = require('../base').Reporter;
 var EncoderBuffer = require('../base').EncoderBuffer;
 var assert = require('minimalistic-assert');
@@ -12226,7 +11416,7 @@ Node.prototype._encodePrimitive = function encodePrimitive(tag, data) {
     throw new Error('Unsupported tag: ' + tag);
 };
 
-},{"../base":71,"minimalistic-assert":80}],73:[function(require,module,exports){
+},{"../base":59,"minimalistic-assert":68}],61:[function(require,module,exports){
 var inherits = require('inherits');
 
 function Reporter(options) {
@@ -12317,7 +11507,7 @@ ReporterError.prototype.rethrow = function rethrow(msg) {
   return this;
 };
 
-},{"inherits":157}],74:[function(require,module,exports){
+},{"inherits":145}],62:[function(require,module,exports){
 var constants = require('../constants');
 
 exports.tagClass = {
@@ -12361,7 +11551,7 @@ exports.tag = {
 };
 exports.tagByName = constants._reverse(exports.tag);
 
-},{"../constants":75}],75:[function(require,module,exports){
+},{"../constants":63}],63:[function(require,module,exports){
 var constants = exports;
 
 // Helper
@@ -12382,7 +11572,7 @@ constants._reverse = function reverse(map) {
 
 constants.der = require('./der');
 
-},{"./der":74}],76:[function(require,module,exports){
+},{"./der":62}],64:[function(require,module,exports){
 var inherits = require('inherits');
 
 var asn1 = require('../../asn1');
@@ -12684,12 +11874,12 @@ function derDecodeLen(buf, primitive, fail) {
   return len;
 }
 
-},{"../../asn1":68,"inherits":157}],77:[function(require,module,exports){
+},{"../../asn1":56,"inherits":145}],65:[function(require,module,exports){
 var decoders = exports;
 
 decoders.der = require('./der');
 
-},{"./der":76}],78:[function(require,module,exports){
+},{"./der":64}],66:[function(require,module,exports){
 var inherits = require('inherits');
 var Buffer = require('buffer').Buffer;
 
@@ -12961,12 +12151,12 @@ function encodeTag(tag, primitive, cls, reporter) {
   return res;
 }
 
-},{"../../asn1":68,"buffer":15,"inherits":157}],79:[function(require,module,exports){
+},{"../../asn1":56,"buffer":3,"inherits":145}],67:[function(require,module,exports){
 var encoders = exports;
 
 encoders.der = require('./der');
 
-},{"./der":78}],80:[function(require,module,exports){
+},{"./der":66}],68:[function(require,module,exports){
 module.exports = assert;
 
 function assert(val, msg) {
@@ -12979,7 +12169,7 @@ assert.equal = function assertEqual(l, r, msg) {
     throw new Error(msg || ('Assertion failed: ' + l + ' != ' + r));
 };
 
-},{}],81:[function(require,module,exports){
+},{}],69:[function(require,module,exports){
 (function (Buffer){
 var createHmac = require('create-hmac')
 
@@ -13061,7 +12251,7 @@ function pbkdf2Sync (password, salt, iterations, keylen, digest) {
 }
 
 }).call(this,require("buffer").Buffer)
-},{"buffer":15,"create-hmac":119}],82:[function(require,module,exports){
+},{"buffer":3,"create-hmac":107}],70:[function(require,module,exports){
 (function (Buffer){
 // much of this based on https://github.com/indutny/self-signed/blob/gh-pages/lib/rsa.js
 var parseKeys = require('parse-asn1')
@@ -13239,7 +12429,7 @@ function makeR (g, k, p, q) {
 }
 
 }).call(this,require("buffer").Buffer)
-},{"./curves":40,"bn.js":41,"browserify-rsa":42,"buffer":15,"create-hmac":119,"elliptic":43,"parse-asn1":67}],83:[function(require,module,exports){
+},{"./curves":28,"bn.js":29,"browserify-rsa":30,"buffer":3,"create-hmac":107,"elliptic":31,"parse-asn1":55}],71:[function(require,module,exports){
 (function (Buffer){
 'use strict'
 // much of this based on https://github.com/indutny/self-signed/blob/gh-pages/lib/rsa.js
@@ -13343,7 +12533,7 @@ function checkValue (b, q) {
 }
 
 }).call(this,require("buffer").Buffer)
-},{"./curves":40,"bn.js":41,"buffer":15,"elliptic":43,"parse-asn1":67}],84:[function(require,module,exports){
+},{"./curves":28,"bn.js":29,"buffer":3,"elliptic":31,"parse-asn1":55}],72:[function(require,module,exports){
 (function (Buffer){
 var elliptic = require('elliptic');
 var BN = require('bn.js');
@@ -13462,53 +12652,53 @@ function formatReturnValue(bn, enc, len) {
 	}
 }
 }).call(this,require("buffer").Buffer)
-},{"bn.js":86,"buffer":15,"elliptic":87}],85:[function(require,module,exports){
+},{"bn.js":74,"buffer":3,"elliptic":75}],73:[function(require,module,exports){
 var createECDH = require('crypto').createECDH;
 
 module.exports = createECDH || require('./browser');
-},{"./browser":84,"crypto":19}],86:[function(require,module,exports){
+},{"./browser":72,"crypto":7}],74:[function(require,module,exports){
+arguments[4][29][0].apply(exports,arguments)
+},{"dup":29}],75:[function(require,module,exports){
+arguments[4][31][0].apply(exports,arguments)
+},{"../package.json":94,"./elliptic/curve":78,"./elliptic/curves":81,"./elliptic/ec":82,"./elliptic/hmac-drbg":85,"./elliptic/utils":86,"brorand":87,"dup":31}],76:[function(require,module,exports){
+arguments[4][32][0].apply(exports,arguments)
+},{"../../elliptic":75,"bn.js":74,"dup":32}],77:[function(require,module,exports){
+arguments[4][33][0].apply(exports,arguments)
+},{"../../elliptic":75,"../curve":78,"bn.js":74,"dup":33,"inherits":145}],78:[function(require,module,exports){
+arguments[4][34][0].apply(exports,arguments)
+},{"./base":76,"./edwards":77,"./mont":79,"./short":80,"dup":34}],79:[function(require,module,exports){
+arguments[4][35][0].apply(exports,arguments)
+},{"../../elliptic":75,"../curve":78,"bn.js":74,"dup":35,"inherits":145}],80:[function(require,module,exports){
+arguments[4][36][0].apply(exports,arguments)
+},{"../../elliptic":75,"../curve":78,"bn.js":74,"dup":36,"inherits":145}],81:[function(require,module,exports){
+arguments[4][37][0].apply(exports,arguments)
+},{"../elliptic":75,"bn.js":74,"dup":37,"hash.js":88}],82:[function(require,module,exports){
+arguments[4][38][0].apply(exports,arguments)
+},{"../../elliptic":75,"./key":83,"./signature":84,"bn.js":74,"dup":38}],83:[function(require,module,exports){
+arguments[4][39][0].apply(exports,arguments)
+},{"../../elliptic":75,"bn.js":74,"dup":39}],84:[function(require,module,exports){
+arguments[4][40][0].apply(exports,arguments)
+},{"../../elliptic":75,"bn.js":74,"dup":40}],85:[function(require,module,exports){
 arguments[4][41][0].apply(exports,arguments)
-},{"dup":41}],87:[function(require,module,exports){
+},{"../elliptic":75,"dup":41,"hash.js":88}],86:[function(require,module,exports){
+arguments[4][42][0].apply(exports,arguments)
+},{"bn.js":74,"dup":42}],87:[function(require,module,exports){
 arguments[4][43][0].apply(exports,arguments)
-},{"../package.json":106,"./elliptic/curve":90,"./elliptic/curves":93,"./elliptic/ec":94,"./elliptic/hmac-drbg":97,"./elliptic/utils":98,"brorand":99,"dup":43}],88:[function(require,module,exports){
+},{"dup":43}],88:[function(require,module,exports){
 arguments[4][44][0].apply(exports,arguments)
-},{"../../elliptic":87,"bn.js":86,"dup":44}],89:[function(require,module,exports){
+},{"./hash/common":89,"./hash/hmac":90,"./hash/ripemd":91,"./hash/sha":92,"./hash/utils":93,"dup":44}],89:[function(require,module,exports){
 arguments[4][45][0].apply(exports,arguments)
-},{"../../elliptic":87,"../curve":90,"bn.js":86,"dup":45,"inherits":157}],90:[function(require,module,exports){
+},{"../hash":88,"dup":45}],90:[function(require,module,exports){
 arguments[4][46][0].apply(exports,arguments)
-},{"./base":88,"./edwards":89,"./mont":91,"./short":92,"dup":46}],91:[function(require,module,exports){
+},{"../hash":88,"dup":46}],91:[function(require,module,exports){
 arguments[4][47][0].apply(exports,arguments)
-},{"../../elliptic":87,"../curve":90,"bn.js":86,"dup":47,"inherits":157}],92:[function(require,module,exports){
+},{"../hash":88,"dup":47}],92:[function(require,module,exports){
 arguments[4][48][0].apply(exports,arguments)
-},{"../../elliptic":87,"../curve":90,"bn.js":86,"dup":48,"inherits":157}],93:[function(require,module,exports){
+},{"../hash":88,"dup":48}],93:[function(require,module,exports){
 arguments[4][49][0].apply(exports,arguments)
-},{"../elliptic":87,"bn.js":86,"dup":49,"hash.js":100}],94:[function(require,module,exports){
+},{"dup":49,"inherits":145}],94:[function(require,module,exports){
 arguments[4][50][0].apply(exports,arguments)
-},{"../../elliptic":87,"./key":95,"./signature":96,"bn.js":86,"dup":50}],95:[function(require,module,exports){
-arguments[4][51][0].apply(exports,arguments)
-},{"../../elliptic":87,"bn.js":86,"dup":51}],96:[function(require,module,exports){
-arguments[4][52][0].apply(exports,arguments)
-},{"../../elliptic":87,"bn.js":86,"dup":52}],97:[function(require,module,exports){
-arguments[4][53][0].apply(exports,arguments)
-},{"../elliptic":87,"dup":53,"hash.js":100}],98:[function(require,module,exports){
-arguments[4][54][0].apply(exports,arguments)
-},{"bn.js":86,"dup":54}],99:[function(require,module,exports){
-arguments[4][55][0].apply(exports,arguments)
-},{"dup":55}],100:[function(require,module,exports){
-arguments[4][56][0].apply(exports,arguments)
-},{"./hash/common":101,"./hash/hmac":102,"./hash/ripemd":103,"./hash/sha":104,"./hash/utils":105,"dup":56}],101:[function(require,module,exports){
-arguments[4][57][0].apply(exports,arguments)
-},{"../hash":100,"dup":57}],102:[function(require,module,exports){
-arguments[4][58][0].apply(exports,arguments)
-},{"../hash":100,"dup":58}],103:[function(require,module,exports){
-arguments[4][59][0].apply(exports,arguments)
-},{"../hash":100,"dup":59}],104:[function(require,module,exports){
-arguments[4][60][0].apply(exports,arguments)
-},{"../hash":100,"dup":60}],105:[function(require,module,exports){
-arguments[4][61][0].apply(exports,arguments)
-},{"dup":61,"inherits":157}],106:[function(require,module,exports){
-arguments[4][62][0].apply(exports,arguments)
-},{"dup":62}],107:[function(require,module,exports){
+},{"dup":50}],95:[function(require,module,exports){
 (function (Buffer){
 'use strict';
 var inherits = require('inherits')
@@ -13601,7 +12791,7 @@ module.exports = function createHash (alg) {
 }
 
 }).call(this,require("buffer").Buffer)
-},{"./md5":109,"buffer":15,"inherits":157,"ripemd160":110,"sha.js":112,"stream":172}],108:[function(require,module,exports){
+},{"./md5":97,"buffer":3,"inherits":145,"ripemd160":98,"sha.js":100,"stream":160}],96:[function(require,module,exports){
 (function (Buffer){
 'use strict';
 var intSize = 4;
@@ -13638,7 +12828,7 @@ function hash(buf, fn, hashSize, bigEndian) {
 }
 exports.hash = hash;
 }).call(this,require("buffer").Buffer)
-},{"buffer":15}],109:[function(require,module,exports){
+},{"buffer":3}],97:[function(require,module,exports){
 'use strict';
 /*
  * A JavaScript implementation of the RSA Data Security, Inc. MD5 Message
@@ -13795,7 +12985,7 @@ function bit_rol(num, cnt)
 module.exports = function md5(buf) {
   return helpers.hash(buf, core_md5, 16);
 };
-},{"./helpers":108}],110:[function(require,module,exports){
+},{"./helpers":96}],98:[function(require,module,exports){
 (function (Buffer){
 /*
 CryptoJS v3.1.2
@@ -14005,7 +13195,7 @@ function ripemd160(message) {
 module.exports = ripemd160
 
 }).call(this,require("buffer").Buffer)
-},{"buffer":15}],111:[function(require,module,exports){
+},{"buffer":3}],99:[function(require,module,exports){
 (function (Buffer){
 //prototype class for hash functions
 function Hash (blockSize, finalSize) {
@@ -14078,7 +13268,7 @@ Hash.prototype._update = function () {
 module.exports = Hash
 
 }).call(this,require("buffer").Buffer)
-},{"buffer":15}],112:[function(require,module,exports){
+},{"buffer":3}],100:[function(require,module,exports){
 var exports = module.exports = function (alg) {
   var Alg = exports[alg.toLowerCase()]
   if(!Alg) throw new Error(alg + ' is not supported (we accept pull requests)')
@@ -14093,7 +13283,7 @@ exports.sha256 = require('./sha256')
 exports.sha384 = require('./sha384')
 exports.sha512 = require('./sha512')
 
-},{"./sha":113,"./sha1":114,"./sha224":115,"./sha256":116,"./sha384":117,"./sha512":118}],113:[function(require,module,exports){
+},{"./sha":101,"./sha1":102,"./sha224":103,"./sha256":104,"./sha384":105,"./sha512":106}],101:[function(require,module,exports){
 (function (Buffer){
 /*
  * A JavaScript implementation of the Secure Hash Algorithm, SHA-0, as defined
@@ -14196,7 +13386,7 @@ module.exports = Sha
 
 
 }).call(this,require("buffer").Buffer)
-},{"./hash":111,"buffer":15,"inherits":157}],114:[function(require,module,exports){
+},{"./hash":99,"buffer":3,"inherits":145}],102:[function(require,module,exports){
 (function (Buffer){
 /*
  * A JavaScript implementation of the Secure Hash Algorithm, SHA-1, as defined
@@ -14296,7 +13486,7 @@ module.exports = Sha1
 
 
 }).call(this,require("buffer").Buffer)
-},{"./hash":111,"buffer":15,"inherits":157}],115:[function(require,module,exports){
+},{"./hash":99,"buffer":3,"inherits":145}],103:[function(require,module,exports){
 (function (Buffer){
 /**
  * A JavaScript implementation of the Secure Hash Algorithm, SHA-256, as defined
@@ -14352,7 +13542,7 @@ Sha224.prototype._hash = function () {
 module.exports = Sha224
 
 }).call(this,require("buffer").Buffer)
-},{"./hash":111,"./sha256":116,"buffer":15,"inherits":157}],116:[function(require,module,exports){
+},{"./hash":99,"./sha256":104,"buffer":3,"inherits":145}],104:[function(require,module,exports){
 (function (Buffer){
 /**
  * A JavaScript implementation of the Secure Hash Algorithm, SHA-256, as defined
@@ -14505,7 +13695,7 @@ Sha256.prototype._hash = function () {
 module.exports = Sha256
 
 }).call(this,require("buffer").Buffer)
-},{"./hash":111,"buffer":15,"inherits":157}],117:[function(require,module,exports){
+},{"./hash":99,"buffer":3,"inherits":145}],105:[function(require,module,exports){
 (function (Buffer){
 var inherits = require('inherits')
 var SHA512 = require('./sha512');
@@ -14565,7 +13755,7 @@ Sha384.prototype._hash = function () {
 module.exports = Sha384
 
 }).call(this,require("buffer").Buffer)
-},{"./hash":111,"./sha512":118,"buffer":15,"inherits":157}],118:[function(require,module,exports){
+},{"./hash":99,"./sha512":106,"buffer":3,"inherits":145}],106:[function(require,module,exports){
 (function (Buffer){
 var inherits = require('inherits')
 var Hash = require('./hash')
@@ -14814,7 +14004,7 @@ Sha512.prototype._hash = function () {
 module.exports = Sha512
 
 }).call(this,require("buffer").Buffer)
-},{"./hash":111,"buffer":15,"inherits":157}],119:[function(require,module,exports){
+},{"./hash":99,"buffer":3,"inherits":145}],107:[function(require,module,exports){
 (function (Buffer){
 'use strict';
 var createHash = require('create-hash/browser');
@@ -14886,7 +14076,7 @@ module.exports = function createHmac(alg, key) {
 }
 
 }).call(this,require("buffer").Buffer)
-},{"buffer":15,"create-hash/browser":107,"inherits":157,"stream":172}],120:[function(require,module,exports){
+},{"buffer":3,"create-hash/browser":95,"inherits":145,"stream":160}],108:[function(require,module,exports){
 (function (Buffer){
 var generatePrime = require('./lib/generatePrime');
 var primes = require('./lib/primes');
@@ -14930,7 +14120,7 @@ exports.DiffieHellmanGroup = exports.createDiffieHellmanGroup = exports.getDiffi
 exports.createDiffieHellman = exports.DiffieHellman = createDiffieHellman;
 
 }).call(this,require("buffer").Buffer)
-},{"./lib/dh":121,"./lib/generatePrime":122,"./lib/primes":123,"buffer":15}],121:[function(require,module,exports){
+},{"./lib/dh":109,"./lib/generatePrime":110,"./lib/primes":111,"buffer":3}],109:[function(require,module,exports){
 (function (Buffer){
 var BN = require('bn.js');
 var MillerRabin = require('miller-rabin');
@@ -15100,7 +14290,7 @@ function formatReturnValue(bn, enc) {
   }
 }
 }).call(this,require("buffer").Buffer)
-},{"./generatePrime":122,"bn.js":124,"buffer":15,"miller-rabin":125,"randombytes":155}],122:[function(require,module,exports){
+},{"./generatePrime":110,"bn.js":112,"buffer":3,"miller-rabin":113,"randombytes":143}],110:[function(require,module,exports){
 var randomBytes = require('randombytes');
 module.exports = findPrime;
 findPrime.simpleSieve = simpleSieve;
@@ -15233,7 +14423,7 @@ function findPrime(bits, gen) {
   }
 
 }
-},{"bn.js":124,"miller-rabin":125,"randombytes":155}],123:[function(require,module,exports){
+},{"bn.js":112,"miller-rabin":113,"randombytes":143}],111:[function(require,module,exports){
 module.exports={
     "modp1": {
         "gen": "02",
@@ -15268,9 +14458,9 @@ module.exports={
         "prime": "ffffffffffffffffc90fdaa22168c234c4c6628b80dc1cd129024e088a67cc74020bbea63b139b22514a08798e3404ddef9519b3cd3a431b302b0a6df25f14374fe1356d6d51c245e485b576625e7ec6f44c42e9a637ed6b0bff5cb6f406b7edee386bfb5a899fa5ae9f24117c4b1fe649286651ece45b3dc2007cb8a163bf0598da48361c55d39a69163fa8fd24cf5f83655d23dca3ad961c62f356208552bb9ed529077096966d670c354e4abc9804f1746c08ca18217c32905e462e36ce3be39e772c180e86039b2783a2ec07a28fb5c55df06f4c52c9de2bcbf6955817183995497cea956ae515d2261898fa051015728e5a8aaac42dad33170d04507a33a85521abdf1cba64ecfb850458dbef0a8aea71575d060c7db3970f85a6e1e4c7abf5ae8cdb0933d71e8c94e04a25619dcee3d2261ad2ee6bf12ffa06d98a0864d87602733ec86a64521f2b18177b200cbbe117577a615d6c770988c0bad946e208e24fa074e5ab3143db5bfce0fd108e4b82d120a92108011a723c12a787e6d788719a10bdba5b2699c327186af4e23c1a946834b6150bda2583e9ca2ad44ce8dbbbc2db04de8ef92e8efc141fbecaa6287c59474e6bc05d99b2964fa090c3a2233ba186515be7ed1f612970cee2d7afb81bdd762170481cd0069127d5b05aa993b4ea988d8fddc186ffb7dc90a6c08f4df435c93402849236c3fab4d27c7026c1d4dcb2602646dec9751e763dba37bdf8ff9406ad9e530ee5db382f413001aeb06a53ed9027d831179727b0865a8918da3edbebcf9b14ed44ce6cbaced4bb1bdb7f1447e6cc254b332051512bd7af426fb8f401378cd2bf5983ca01c64b92ecf032ea15d1721d03f482d7ce6e74fef6d55e702f46980c82b5a84031900b1c9e59e7c97fbec7e8f323a97a7e36cc88be0f1d45b7ff585ac54bd407b22b4154aacc8f6d7ebf48e1d814cc5ed20f8037e0a79715eef29be32806a1d58bb7c5da76f550aa3d8a1fbff0eb19ccb1a313d55cda56c9ec2ef29632387fe8d76e3c0468043e8f663f4860ee12bf2d5b0b7474d6e694f91e6dbe115974a3926f12fee5e438777cb6a932df8cd8bec4d073b931ba3bc832b68d9dd300741fa7bf8afc47ed2576f6936ba424663aab639c5ae4f5683423b4742bf1c978238f16cbe39d652de3fdb8befc848ad922222e04a4037c0713eb57a81a23f0c73473fc646cea306b4bcbc8862f8385ddfa9d4b7fa2c087e879683303ed5bdd3a062b3cf5b3a278a66d2a13f83f44f82ddf310ee074ab6a364597e899a0255dc164f31cc50846851df9ab48195ded7ea1b1d510bd7ee74d73faf36bc31ecfa268359046f4eb879f924009438b481c6cd7889a002ed5ee382bc9190da6fc026e479558e4475677e9aa9e3050e2765694dfc81f56e880b96e7160c980dd98edd3dfffffffffffffffff"
     }
 }
-},{}],124:[function(require,module,exports){
-arguments[4][41][0].apply(exports,arguments)
-},{"dup":41}],125:[function(require,module,exports){
+},{}],112:[function(require,module,exports){
+arguments[4][29][0].apply(exports,arguments)
+},{"dup":29}],113:[function(require,module,exports){
 var bn = require('bn.js');
 var brorand = require('brorand');
 
@@ -15386,9 +14576,9 @@ MillerRabin.prototype.getDivisor = function getDivisor(n, k) {
   return prime;
 };
 
-},{"bn.js":124,"brorand":126}],126:[function(require,module,exports){
-arguments[4][55][0].apply(exports,arguments)
-},{"dup":55}],127:[function(require,module,exports){
+},{"bn.js":112,"brorand":114}],114:[function(require,module,exports){
+arguments[4][43][0].apply(exports,arguments)
+},{"dup":43}],115:[function(require,module,exports){
 (function (Buffer){
 var createHmac = require('create-hmac')
 var MAX_ALLOC = Math.pow(2, 30) - 1 // default in iojs
@@ -15472,7 +14662,7 @@ function pbkdf2Sync (password, salt, iterations, keylen, digest) {
 }
 
 }).call(this,require("buffer").Buffer)
-},{"buffer":15,"create-hmac":119}],128:[function(require,module,exports){
+},{"buffer":3,"create-hmac":107}],116:[function(require,module,exports){
 exports.publicEncrypt = require('./publicEncrypt');
 exports.privateDecrypt = require('./privateDecrypt');
 
@@ -15483,7 +14673,7 @@ exports.privateEncrypt = function privateEncrypt(key, buf) {
 exports.publicDecrypt = function publicDecrypt(key, buf) {
   return exports.privateDecrypt(key, buf, true);
 };
-},{"./privateDecrypt":151,"./publicEncrypt":152}],129:[function(require,module,exports){
+},{"./privateDecrypt":139,"./publicEncrypt":140}],117:[function(require,module,exports){
 (function (Buffer){
 var createHash = require('create-hash');
 module.exports = function (seed, len) {
@@ -15502,49 +14692,49 @@ function i2ops(c) {
   return out;
 }
 }).call(this,require("buffer").Buffer)
-},{"buffer":15,"create-hash":107}],130:[function(require,module,exports){
-arguments[4][41][0].apply(exports,arguments)
-},{"dup":41}],131:[function(require,module,exports){
-arguments[4][42][0].apply(exports,arguments)
-},{"bn.js":130,"buffer":15,"dup":42,"randombytes":155}],132:[function(require,module,exports){
+},{"buffer":3,"create-hash":95}],118:[function(require,module,exports){
+arguments[4][29][0].apply(exports,arguments)
+},{"dup":29}],119:[function(require,module,exports){
+arguments[4][30][0].apply(exports,arguments)
+},{"bn.js":118,"buffer":3,"dup":30,"randombytes":143}],120:[function(require,module,exports){
+arguments[4][51][0].apply(exports,arguments)
+},{"buffer":3,"create-hash":95,"dup":51}],121:[function(require,module,exports){
+arguments[4][52][0].apply(exports,arguments)
+},{"dup":52}],122:[function(require,module,exports){
+arguments[4][53][0].apply(exports,arguments)
+},{"asn1.js":125,"dup":53}],123:[function(require,module,exports){
+arguments[4][54][0].apply(exports,arguments)
+},{"./EVP_BytesToKey":120,"browserify-aes":11,"buffer":3,"dup":54}],124:[function(require,module,exports){
+arguments[4][55][0].apply(exports,arguments)
+},{"./aesid.json":121,"./asn1":122,"./fixProc":123,"browserify-aes":11,"buffer":3,"dup":55,"pbkdf2-compat":138}],125:[function(require,module,exports){
+arguments[4][56][0].apply(exports,arguments)
+},{"./asn1/api":126,"./asn1/base":128,"./asn1/constants":132,"./asn1/decoders":134,"./asn1/encoders":136,"bn.js":118,"dup":56}],126:[function(require,module,exports){
+arguments[4][57][0].apply(exports,arguments)
+},{"../asn1":125,"dup":57,"inherits":145,"vm":162}],127:[function(require,module,exports){
+arguments[4][58][0].apply(exports,arguments)
+},{"../base":128,"buffer":3,"dup":58,"inherits":145}],128:[function(require,module,exports){
+arguments[4][59][0].apply(exports,arguments)
+},{"./buffer":127,"./node":129,"./reporter":130,"dup":59}],129:[function(require,module,exports){
+arguments[4][60][0].apply(exports,arguments)
+},{"../base":128,"dup":60,"minimalistic-assert":137}],130:[function(require,module,exports){
+arguments[4][61][0].apply(exports,arguments)
+},{"dup":61,"inherits":145}],131:[function(require,module,exports){
+arguments[4][62][0].apply(exports,arguments)
+},{"../constants":132,"dup":62}],132:[function(require,module,exports){
 arguments[4][63][0].apply(exports,arguments)
-},{"buffer":15,"create-hash":107,"dup":63}],133:[function(require,module,exports){
+},{"./der":131,"dup":63}],133:[function(require,module,exports){
 arguments[4][64][0].apply(exports,arguments)
-},{"dup":64}],134:[function(require,module,exports){
+},{"../../asn1":125,"dup":64,"inherits":145}],134:[function(require,module,exports){
 arguments[4][65][0].apply(exports,arguments)
-},{"asn1.js":137,"dup":65}],135:[function(require,module,exports){
+},{"./der":133,"dup":65}],135:[function(require,module,exports){
 arguments[4][66][0].apply(exports,arguments)
-},{"./EVP_BytesToKey":132,"browserify-aes":23,"buffer":15,"dup":66}],136:[function(require,module,exports){
+},{"../../asn1":125,"buffer":3,"dup":66,"inherits":145}],136:[function(require,module,exports){
 arguments[4][67][0].apply(exports,arguments)
-},{"./aesid.json":133,"./asn1":134,"./fixProc":135,"browserify-aes":23,"buffer":15,"dup":67,"pbkdf2-compat":150}],137:[function(require,module,exports){
+},{"./der":135,"dup":67}],137:[function(require,module,exports){
 arguments[4][68][0].apply(exports,arguments)
-},{"./asn1/api":138,"./asn1/base":140,"./asn1/constants":144,"./asn1/decoders":146,"./asn1/encoders":148,"bn.js":130,"dup":68}],138:[function(require,module,exports){
+},{"dup":68}],138:[function(require,module,exports){
 arguments[4][69][0].apply(exports,arguments)
-},{"../asn1":137,"dup":69,"inherits":157,"vm":174}],139:[function(require,module,exports){
-arguments[4][70][0].apply(exports,arguments)
-},{"../base":140,"buffer":15,"dup":70,"inherits":157}],140:[function(require,module,exports){
-arguments[4][71][0].apply(exports,arguments)
-},{"./buffer":139,"./node":141,"./reporter":142,"dup":71}],141:[function(require,module,exports){
-arguments[4][72][0].apply(exports,arguments)
-},{"../base":140,"dup":72,"minimalistic-assert":149}],142:[function(require,module,exports){
-arguments[4][73][0].apply(exports,arguments)
-},{"dup":73,"inherits":157}],143:[function(require,module,exports){
-arguments[4][74][0].apply(exports,arguments)
-},{"../constants":144,"dup":74}],144:[function(require,module,exports){
-arguments[4][75][0].apply(exports,arguments)
-},{"./der":143,"dup":75}],145:[function(require,module,exports){
-arguments[4][76][0].apply(exports,arguments)
-},{"../../asn1":137,"dup":76,"inherits":157}],146:[function(require,module,exports){
-arguments[4][77][0].apply(exports,arguments)
-},{"./der":145,"dup":77}],147:[function(require,module,exports){
-arguments[4][78][0].apply(exports,arguments)
-},{"../../asn1":137,"buffer":15,"dup":78,"inherits":157}],148:[function(require,module,exports){
-arguments[4][79][0].apply(exports,arguments)
-},{"./der":147,"dup":79}],149:[function(require,module,exports){
-arguments[4][80][0].apply(exports,arguments)
-},{"dup":80}],150:[function(require,module,exports){
-arguments[4][81][0].apply(exports,arguments)
-},{"buffer":15,"create-hmac":119,"dup":81}],151:[function(require,module,exports){
+},{"buffer":3,"create-hmac":107,"dup":69}],139:[function(require,module,exports){
 (function (Buffer){
 var parseKeys = require('parse-asn1');
 var mgf = require('./mgf');
@@ -15655,7 +14845,7 @@ function compare(a, b){
   return dif;
 }
 }).call(this,require("buffer").Buffer)
-},{"./mgf":129,"./withPublic":153,"./xor":154,"bn.js":130,"browserify-rsa":131,"buffer":15,"create-hash":107,"parse-asn1":136}],152:[function(require,module,exports){
+},{"./mgf":117,"./withPublic":141,"./xor":142,"bn.js":118,"browserify-rsa":119,"buffer":3,"create-hash":95,"parse-asn1":124}],140:[function(require,module,exports){
 (function (Buffer){
 var parseKeys = require('parse-asn1');
 var randomBytes = require('randombytes');
@@ -15753,7 +14943,7 @@ function nonZero(len, crypto) {
   return out;
 }
 }).call(this,require("buffer").Buffer)
-},{"./mgf":129,"./withPublic":153,"./xor":154,"bn.js":130,"browserify-rsa":131,"buffer":15,"create-hash":107,"parse-asn1":136,"randombytes":155}],153:[function(require,module,exports){
+},{"./mgf":117,"./withPublic":141,"./xor":142,"bn.js":118,"browserify-rsa":119,"buffer":3,"create-hash":95,"parse-asn1":124,"randombytes":143}],141:[function(require,module,exports){
 (function (Buffer){
 var bn = require('bn.js');
 function withPublic(paddedMsg, key) {
@@ -15766,7 +14956,7 @@ function withPublic(paddedMsg, key) {
 
 module.exports = withPublic;
 }).call(this,require("buffer").Buffer)
-},{"bn.js":130,"buffer":15}],154:[function(require,module,exports){
+},{"bn.js":118,"buffer":3}],142:[function(require,module,exports){
 module.exports = function xor(a, b) {
   var len = a.length;
   var i = -1;
@@ -15775,7 +14965,7 @@ module.exports = function xor(a, b) {
   }
   return a
 };
-},{}],155:[function(require,module,exports){
+},{}],143:[function(require,module,exports){
 (function (process,global,Buffer){
 'use strict';
 
@@ -15807,7 +14997,7 @@ function oldBrowser() {
 }
 
 }).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {},require("buffer").Buffer)
-},{"_process":160,"buffer":15}],156:[function(require,module,exports){
+},{"_process":148,"buffer":3}],144:[function(require,module,exports){
 // Copyright Joyent, Inc. and other Node contributors.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
@@ -16110,7 +15300,7 @@ function isUndefined(arg) {
   return arg === void 0;
 }
 
-},{}],157:[function(require,module,exports){
+},{}],145:[function(require,module,exports){
 if (typeof Object.create === 'function') {
   // implementation from standard node.js 'util' module
   module.exports = function inherits(ctor, superCtor) {
@@ -16135,12 +15325,12 @@ if (typeof Object.create === 'function') {
   }
 }
 
-},{}],158:[function(require,module,exports){
+},{}],146:[function(require,module,exports){
 module.exports = Array.isArray || function (arr) {
   return Object.prototype.toString.call(arr) == '[object Array]';
 };
 
-},{}],159:[function(require,module,exports){
+},{}],147:[function(require,module,exports){
 (function (process){
 // Copyright Joyent, Inc. and other Node contributors.
 //
@@ -16368,7 +15558,7 @@ var substr = 'ab'.substr(-1) === 'b'
 ;
 
 }).call(this,require('_process'))
-},{"_process":160}],160:[function(require,module,exports){
+},{"_process":148}],148:[function(require,module,exports){
 // shim for using process in browser
 
 var process = module.exports = {};
@@ -16428,10 +15618,10 @@ process.chdir = function (dir) {
 };
 process.umask = function() { return 0; };
 
-},{}],161:[function(require,module,exports){
+},{}],149:[function(require,module,exports){
 module.exports = require("./lib/_stream_duplex.js")
 
-},{"./lib/_stream_duplex.js":162}],162:[function(require,module,exports){
+},{"./lib/_stream_duplex.js":150}],150:[function(require,module,exports){
 (function (process){
 // Copyright Joyent, Inc. and other Node contributors.
 //
@@ -16524,7 +15714,7 @@ function forEach (xs, f) {
 }
 
 }).call(this,require('_process'))
-},{"./_stream_readable":164,"./_stream_writable":166,"_process":160,"core-util-is":167,"inherits":157}],163:[function(require,module,exports){
+},{"./_stream_readable":152,"./_stream_writable":154,"_process":148,"core-util-is":155,"inherits":145}],151:[function(require,module,exports){
 // Copyright Joyent, Inc. and other Node contributors.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
@@ -16572,7 +15762,7 @@ PassThrough.prototype._transform = function(chunk, encoding, cb) {
   cb(null, chunk);
 };
 
-},{"./_stream_transform":165,"core-util-is":167,"inherits":157}],164:[function(require,module,exports){
+},{"./_stream_transform":153,"core-util-is":155,"inherits":145}],152:[function(require,module,exports){
 (function (process){
 // Copyright Joyent, Inc. and other Node contributors.
 //
@@ -17558,7 +16748,7 @@ function indexOf (xs, x) {
 }
 
 }).call(this,require('_process'))
-},{"_process":160,"buffer":15,"core-util-is":167,"events":156,"inherits":157,"isarray":158,"stream":172,"string_decoder/":173}],165:[function(require,module,exports){
+},{"_process":148,"buffer":3,"core-util-is":155,"events":144,"inherits":145,"isarray":146,"stream":160,"string_decoder/":161}],153:[function(require,module,exports){
 // Copyright Joyent, Inc. and other Node contributors.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
@@ -17770,7 +16960,7 @@ function done(stream, er) {
   return stream.push(null);
 }
 
-},{"./_stream_duplex":162,"core-util-is":167,"inherits":157}],166:[function(require,module,exports){
+},{"./_stream_duplex":150,"core-util-is":155,"inherits":145}],154:[function(require,module,exports){
 (function (process){
 // Copyright Joyent, Inc. and other Node contributors.
 //
@@ -18160,7 +17350,7 @@ function endWritable(stream, state, cb) {
 }
 
 }).call(this,require('_process'))
-},{"./_stream_duplex":162,"_process":160,"buffer":15,"core-util-is":167,"inherits":157,"stream":172}],167:[function(require,module,exports){
+},{"./_stream_duplex":150,"_process":148,"buffer":3,"core-util-is":155,"inherits":145,"stream":160}],155:[function(require,module,exports){
 (function (Buffer){
 // Copyright Joyent, Inc. and other Node contributors.
 //
@@ -18270,10 +17460,10 @@ function objectToString(o) {
   return Object.prototype.toString.call(o);
 }
 }).call(this,require("buffer").Buffer)
-},{"buffer":15}],168:[function(require,module,exports){
+},{"buffer":3}],156:[function(require,module,exports){
 module.exports = require("./lib/_stream_passthrough.js")
 
-},{"./lib/_stream_passthrough.js":163}],169:[function(require,module,exports){
+},{"./lib/_stream_passthrough.js":151}],157:[function(require,module,exports){
 var Stream = require('stream'); // hack to fix a circular dependency issue when used with browserify
 exports = module.exports = require('./lib/_stream_readable.js');
 exports.Stream = Stream;
@@ -18283,13 +17473,13 @@ exports.Duplex = require('./lib/_stream_duplex.js');
 exports.Transform = require('./lib/_stream_transform.js');
 exports.PassThrough = require('./lib/_stream_passthrough.js');
 
-},{"./lib/_stream_duplex.js":162,"./lib/_stream_passthrough.js":163,"./lib/_stream_readable.js":164,"./lib/_stream_transform.js":165,"./lib/_stream_writable.js":166,"stream":172}],170:[function(require,module,exports){
+},{"./lib/_stream_duplex.js":150,"./lib/_stream_passthrough.js":151,"./lib/_stream_readable.js":152,"./lib/_stream_transform.js":153,"./lib/_stream_writable.js":154,"stream":160}],158:[function(require,module,exports){
 module.exports = require("./lib/_stream_transform.js")
 
-},{"./lib/_stream_transform.js":165}],171:[function(require,module,exports){
+},{"./lib/_stream_transform.js":153}],159:[function(require,module,exports){
 module.exports = require("./lib/_stream_writable.js")
 
-},{"./lib/_stream_writable.js":166}],172:[function(require,module,exports){
+},{"./lib/_stream_writable.js":154}],160:[function(require,module,exports){
 // Copyright Joyent, Inc. and other Node contributors.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
@@ -18418,7 +17608,7 @@ Stream.prototype.pipe = function(dest, options) {
   return dest;
 };
 
-},{"events":156,"inherits":157,"readable-stream/duplex.js":161,"readable-stream/passthrough.js":168,"readable-stream/readable.js":169,"readable-stream/transform.js":170,"readable-stream/writable.js":171}],173:[function(require,module,exports){
+},{"events":144,"inherits":145,"readable-stream/duplex.js":149,"readable-stream/passthrough.js":156,"readable-stream/readable.js":157,"readable-stream/transform.js":158,"readable-stream/writable.js":159}],161:[function(require,module,exports){
 // Copyright Joyent, Inc. and other Node contributors.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
@@ -18641,7 +17831,7 @@ function base64DetectIncompleteChar(buffer) {
   this.charLength = this.charReceived ? 3 : 0;
 }
 
-},{"buffer":15}],174:[function(require,module,exports){
+},{"buffer":3}],162:[function(require,module,exports){
 var indexOf = require('indexof');
 
 var Object_keys = function (obj) {
@@ -18781,7 +17971,7 @@ exports.createContext = Script.createContext = function (context) {
     return copy;
 };
 
-},{"indexof":175}],175:[function(require,module,exports){
+},{"indexof":163}],163:[function(require,module,exports){
 
 var indexOf = [].indexOf;
 
@@ -18792,7 +17982,7 @@ module.exports = function(arr, obj){
   }
   return -1;
 };
-},{}],176:[function(require,module,exports){
+},{}],164:[function(require,module,exports){
 /*!
  * @name JavaScript/NodeJS Merge v1.2.0
  * @author yeikos
@@ -18968,9 +18158,9 @@ module.exports = function(arr, obj){
 	}
 
 })(typeof module === 'object' && module && typeof module.exports === 'object' && module.exports);
-},{}],177:[function(require,module,exports){
+},{}],165:[function(require,module,exports){
 module.exports.Color = require('./lib/Color');
-},{"./lib/Color":178}],178:[function(require,module,exports){
+},{"./lib/Color":166}],166:[function(require,module,exports){
 //Color utility class
 
 //## Example use
@@ -19467,12 +18657,12 @@ Color.Orange = new Color(1, 0.5, 0, 1);
 
 module.exports = Color;
 
-},{"lerp":179}],179:[function(require,module,exports){
+},{"lerp":167}],167:[function(require,module,exports){
 function lerp(v0, v1, t) {
     return v0*(1-t)+v1*t
 }
 module.exports = lerp
-},{}],180:[function(require,module,exports){
+},{}],168:[function(require,module,exports){
 var FXStage = require('./lib/FXStage');
 require('./lib/Render');
 require('./lib/Blit');
@@ -19500,7 +18690,7 @@ module.exports = function() {
 };
 
 module.exports.FXStage = FXStage;
-},{"./lib/Add":181,"./lib/Blit":182,"./lib/Blur":183,"./lib/Blur3":184,"./lib/Blur5":185,"./lib/CorrectGamma":186,"./lib/Downsample2":187,"./lib/Downsample4":188,"./lib/FXAA":189,"./lib/FXStage":191,"./lib/Mult":192,"./lib/Render":193,"./lib/SSAO":194,"./lib/Save":195,"./lib/TonemapReinhard":196}],181:[function(require,module,exports){
+},{"./lib/Add":169,"./lib/Blit":170,"./lib/Blur":171,"./lib/Blur3":172,"./lib/Blur5":173,"./lib/CorrectGamma":174,"./lib/Downsample2":175,"./lib/Downsample4":176,"./lib/FXAA":177,"./lib/FXStage":179,"./lib/Mult":180,"./lib/Render":181,"./lib/SSAO":182,"./lib/Save":183,"./lib/TonemapReinhard":184}],169:[function(require,module,exports){
 var FXStage = require('./FXStage');
 
 
@@ -19525,7 +18715,7 @@ FXStage.prototype.add = function (source2, options) {
 };
 
 module.exports = FXStage;
-},{"./FXStage":191}],182:[function(require,module,exports){
+},{"./FXStage":179}],170:[function(require,module,exports){
 var FXStage = require('./FXStage');
 
 FXStage.prototype.blit = function (options) {
@@ -19538,7 +18728,7 @@ FXStage.prototype.blit = function (options) {
 };
 
 module.exports = FXStage;
-},{"./FXStage":191}],183:[function(require,module,exports){
+},{"./FXStage":179}],171:[function(require,module,exports){
 var geom  = require('pex-geom');
 var Vec2 = geom.Vec2;
 var FXStage = require('./FXStage');
@@ -19572,7 +18762,7 @@ FXStage.prototype.blur = function (options) {
 };
 
 module.exports = FXStage;
-},{"./FXStage":191,"pex-geom":212}],184:[function(require,module,exports){
+},{"./FXStage":179,"pex-geom":200}],172:[function(require,module,exports){
 var geom  = require('pex-geom');
 var Vec2 = geom.Vec2;
 var FXStage = require('./FXStage');
@@ -19603,7 +18793,7 @@ FXStage.prototype.blur3 = function (options) {
 };
 
 module.exports = FXStage;
-},{"./FXStage":191,"pex-geom":212}],185:[function(require,module,exports){
+},{"./FXStage":179,"pex-geom":200}],173:[function(require,module,exports){
 var geom  = require('pex-geom');
 var Vec2 = geom.Vec2;
 var FXStage = require('./FXStage');
@@ -19634,7 +18824,7 @@ FXStage.prototype.blur5 = function (options) {
 };
 
 module.exports = FXStage;
-},{"./FXStage":191,"pex-geom":212}],186:[function(require,module,exports){
+},{"./FXStage":179,"pex-geom":200}],174:[function(require,module,exports){
 var FXStage = require('./FXStage');
 
 
@@ -19655,7 +18845,7 @@ FXStage.prototype.correctGamma = function (options) {
 };
 
 module.exports = FXStage;
-},{"./FXStage":191}],187:[function(require,module,exports){
+},{"./FXStage":179}],175:[function(require,module,exports){
 var geom  = require('pex-geom');
 var Vec2 = geom.Vec2;
 var FXStage = require('./FXStage');
@@ -19680,7 +18870,7 @@ FXStage.prototype.downsample2 = function (options) {
 };
 
 module.exports = FXStage;
-},{"./FXStage":191,"pex-geom":212}],188:[function(require,module,exports){
+},{"./FXStage":179,"pex-geom":200}],176:[function(require,module,exports){
 var geom  = require('pex-geom');
 var Vec2 = geom.Vec2;
 var FXStage = require('./FXStage');
@@ -19705,7 +18895,7 @@ FXStage.prototype.downsample4 = function (options) {
 };
 
 module.exports = FXStage;
-},{"./FXStage":191,"pex-geom":212}],189:[function(require,module,exports){
+},{"./FXStage":179,"pex-geom":200}],177:[function(require,module,exports){
 var geom  = require('pex-geom');
 var FXStage = require('./FXStage');
 
@@ -19729,7 +18919,7 @@ FXStage.prototype.fxaa = function (options) {
 };
 
 module.exports = FXStage;
-},{"./FXStage":191,"pex-geom":212}],190:[function(require,module,exports){
+},{"./FXStage":179,"pex-geom":200}],178:[function(require,module,exports){
 function FXResourceMgr() {
   this.cache = [];
 }
@@ -19769,7 +18959,7 @@ FXResourceMgr.prototype.markAllAsNotUsed = function() {
 };
 
 module.exports = FXResourceMgr;
-},{}],191:[function(require,module,exports){
+},{}],179:[function(require,module,exports){
 var glu = require('pex-glu');
 var Context = glu.Context;
 var ScreenImage = glu.ScreenImage;
@@ -19918,7 +19108,7 @@ FXStage.prototype.getFullScreenQuad = function() {
 };
 
 module.exports = FXStage;
-},{"./FXResourceMgr":190,"pex-glu":230}],192:[function(require,module,exports){
+},{"./FXResourceMgr":178,"pex-glu":218}],180:[function(require,module,exports){
 var FXStage = require('./FXStage');
 
 
@@ -19941,7 +19131,7 @@ FXStage.prototype.mult = function (source2, options) {
 };
 
 module.exports = FXStage;
-},{"./FXStage":191}],193:[function(require,module,exports){
+},{"./FXStage":179}],181:[function(require,module,exports){
 var FXStage = require('./FXStage');
 
 FXStage.prototype.render = function (options) {
@@ -19959,7 +19149,7 @@ FXStage.prototype.render = function (options) {
   return this.asFXStage(rt, 'render');
 };
 
-},{"./FXStage":191}],194:[function(require,module,exports){
+},{"./FXStage":179}],182:[function(require,module,exports){
 var FXStage = require('./FXStage');
 var geom = require('pex-geom');
 var glu = require('pex-glu')
@@ -19989,7 +19179,7 @@ FXStage.prototype.ssao = function (options) {
 };
 
 module.exports = FXStage;
-},{"./FXStage":191,"pex-geom":212,"pex-glu":230}],195:[function(require,module,exports){
+},{"./FXStage":179,"pex-geom":200,"pex-glu":218}],183:[function(require,module,exports){
 var geom  = require('pex-geom');
 var glu  = require('pex-glu');
 var FXStage = require('./FXStage');
@@ -20037,7 +19227,7 @@ FXStage.prototype.save = function (path, options) {
 };
 
 module.exports = FXStage;
-},{"./FXStage":191,"pex-geom":212,"pex-glu":230}],196:[function(require,module,exports){
+},{"./FXStage":179,"pex-geom":200,"pex-glu":218}],184:[function(require,module,exports){
 var FXStage = require('./FXStage');
 
 
@@ -20062,7 +19252,7 @@ FXStage.prototype.tonemapReinhard = function (options) {
 };
 
 module.exports = FXStage;
-},{"./FXStage":191}],197:[function(require,module,exports){
+},{"./FXStage":179}],185:[function(require,module,exports){
 module.exports.Plane = require('./lib/Plane');
 module.exports.Cube = require('./lib/Cube');
 module.exports.Box = require('./lib/Box');
@@ -20076,7 +19266,7 @@ module.exports.LineBuilder = require('./lib/LineBuilder');
 module.exports.Loft = require('./lib/Loft');
 module.exports.IsoSurface = require('./lib/IsoSurface');
 module.exports.Cylinder = require('./lib/Cylinder');
-},{"./lib/Box":198,"./lib/Cube":199,"./lib/Cylinder":200,"./lib/Dodecahedron":201,"./lib/HexSphere":202,"./lib/Icosahedron":203,"./lib/IsoSurface":204,"./lib/LineBuilder":205,"./lib/Loft":206,"./lib/Octahedron":207,"./lib/Plane":208,"./lib/Sphere":209,"./lib/Tetrahedron":210}],198:[function(require,module,exports){
+},{"./lib/Box":186,"./lib/Cube":187,"./lib/Cylinder":188,"./lib/Dodecahedron":189,"./lib/HexSphere":190,"./lib/Icosahedron":191,"./lib/IsoSurface":192,"./lib/LineBuilder":193,"./lib/Loft":194,"./lib/Octahedron":195,"./lib/Plane":196,"./lib/Sphere":197,"./lib/Tetrahedron":198}],186:[function(require,module,exports){
 //Like cube but not subdivided and continuous on edges
 
 //## Parent class : [geom.Geometry](../pex-geom/Geometry.html)
@@ -20141,7 +19331,7 @@ Box.prototype = Object.create(Geometry.prototype);
 
 module.exports = Box;
 
-},{"pex-geom":212}],199:[function(require,module,exports){
+},{"pex-geom":200}],187:[function(require,module,exports){
 //Cube geometry generator.
 
 //## Parent class : [geom.Geometry](../pex-geom/Geometry.html)
@@ -20229,7 +19419,7 @@ Cube.prototype = Object.create(Geometry.prototype);
 
 module.exports = Cube;
 
-},{"pex-geom":212}],200:[function(require,module,exports){
+},{"pex-geom":200}],188:[function(require,module,exports){
 //Cylinder geometry generator.
 
 //## Parent class : [geom.Geometry](../pex-geom/Geometry.html)
@@ -20339,7 +19529,7 @@ Cylinder.prototype = Object.create(Geometry.prototype);
 
 module.exports = Cylinder;
 
-},{"pex-geom":212}],201:[function(require,module,exports){
+},{"pex-geom":200}],189:[function(require,module,exports){
 //Dodecahedron geometry generator.
 //Based on http://paulbourke.net/geometry/platonic/
 
@@ -20444,7 +19634,7 @@ function Dodecahedron(r) {
 Dodecahedron.prototype = Object.create(Geometry.prototype);
 
 module.exports = Dodecahedron;
-},{"pex-geom":212}],202:[function(require,module,exports){
+},{"pex-geom":200}],190:[function(require,module,exports){
 //HexSphere geometry generator.
 
 //## Parent class : [geom.Geometry](../pex-geom/Geometry.html)
@@ -20544,7 +19734,7 @@ function centroid(points) {
 function elements(list, indices) {
   return indices.map(function(i) { return list[i]; })
 }
-},{"./Icosahedron":203,"pex-geom":212}],203:[function(require,module,exports){
+},{"./Icosahedron":191,"pex-geom":200}],191:[function(require,module,exports){
 //Icosahedron geometry generator.
 //Based on http://paulbourke.net/geometry/platonic/
 
@@ -20646,7 +19836,7 @@ function Icosahedron(r) {
 Icosahedron.prototype = Object.create(Geometry.prototype);
 
 module.exports = Icosahedron;
-},{"pex-geom":212}],204:[function(require,module,exports){
+},{"pex-geom":200}],192:[function(require,module,exports){
 //Marching Cubes implementation
 
 //## Parent class : [Geometry](../pex-geom/Geometry.html)
@@ -21154,7 +20344,7 @@ var TriangleConnectionTable = [
 ];
 
 module.exports = IsoSurface;
-},{"pex-geom":212}],205:[function(require,module,exports){
+},{"pex-geom":200}],193:[function(require,module,exports){
 //Line based geometry generator useful for debugging.
 
 //## Parent class : [Geometry](../pex-geom/Geometry.html)
@@ -21263,7 +20453,7 @@ LineBuilder.prototype.reset = function() {
 
 module.exports = LineBuilder;
 
-},{"pex-geom":212}],206:[function(require,module,exports){
+},{"pex-geom":200}],194:[function(require,module,exports){
 //Loft geometry generator.  
 //Extruded 2d shape along a 3d curve.  
 
@@ -21551,7 +20741,7 @@ function clamp(value, min, max) {
 
 module.exports = Loft;
 
-},{"./LineBuilder":205,"merge":211,"pex-geom":212}],207:[function(require,module,exports){
+},{"./LineBuilder":193,"merge":199,"pex-geom":200}],195:[function(require,module,exports){
 //Octahedron geometry generator.
 //Based on http://paulbourke.net/geometry/platonic/
 
@@ -21619,7 +20809,7 @@ function Octahedron(r) {
 Octahedron.prototype = Object.create(Geometry.prototype);
 
 module.exports = Octahedron;
-},{"pex-geom":212}],208:[function(require,module,exports){
+},{"pex-geom":200}],196:[function(require,module,exports){
 //Plane geometry generator.
 
 //## Parent class : [Geometry](../pex-geom/Geometry.html)
@@ -21712,7 +20902,7 @@ function Plane(su, sv, nu, nv, u, v) {
 Plane.prototype = Object.create(Geometry.prototype);
 
 module.exports = Plane;
-},{"pex-geom":212}],209:[function(require,module,exports){
+},{"pex-geom":200}],197:[function(require,module,exports){
 //Sphere geometry generator.
 
 //## Parent class : [Geometry](../pex-geom/Geometry.html)
@@ -21802,7 +20992,7 @@ Sphere.prototype = Object.create(Geometry.prototype);
 
 module.exports = Sphere;
 
-},{"pex-geom":212}],210:[function(require,module,exports){
+},{"pex-geom":200}],198:[function(require,module,exports){
 //Tetrahedron geometry generator.
 //Based on http://mathworld.wolfram.com/RegularTetrahedron.html
 
@@ -21855,7 +21045,7 @@ function Tetrahedron(r) {
 Tetrahedron.prototype = Object.create(Geometry.prototype);
 
 module.exports = Tetrahedron;
-},{"pex-geom":212}],211:[function(require,module,exports){
+},{"pex-geom":200}],199:[function(require,module,exports){
 /*!
  * @name JavaScript/NodeJS Merge v1.1.3
  * @author yeikos
@@ -21937,7 +21127,7 @@ module.exports = Tetrahedron;
 	}
 
 })(typeof module === 'object' && module && typeof module.exports === 'object' && module.exports);
-},{}],212:[function(require,module,exports){
+},{}],200:[function(require,module,exports){
 module.exports.Vec2 = require('./lib/Vec2');
 module.exports.Vec3 = require('./lib/Vec3');
 module.exports.Vec4 = require('./lib/Vec4');
@@ -21955,7 +21145,7 @@ module.exports.BoundingBox = require('./lib/BoundingBox');
 module.exports.Triangle2D = require('./lib/Triangle2D');
 module.exports.Triangle3D = require('./lib/Triangle3D');
 module.exports.Octree = require('./lib/Octree');
-},{"./lib/BoundingBox":213,"./lib/Geometry":214,"./lib/Mat4":215,"./lib/Octree":216,"./lib/Path":217,"./lib/Plane":218,"./lib/Quat":219,"./lib/Ray":220,"./lib/Rect":221,"./lib/Spline1D":222,"./lib/Spline2D":223,"./lib/Spline3D":224,"./lib/Triangle2D":225,"./lib/Triangle3D":226,"./lib/Vec2":227,"./lib/Vec3":228,"./lib/Vec4":229}],213:[function(require,module,exports){
+},{"./lib/BoundingBox":201,"./lib/Geometry":202,"./lib/Mat4":203,"./lib/Octree":204,"./lib/Path":205,"./lib/Plane":206,"./lib/Quat":207,"./lib/Ray":208,"./lib/Rect":209,"./lib/Spline1D":210,"./lib/Spline2D":211,"./lib/Spline3D":212,"./lib/Triangle2D":213,"./lib/Triangle3D":214,"./lib/Vec2":215,"./lib/Vec3":216,"./lib/Vec4":217}],201:[function(require,module,exports){
 //A bounding box is a box with the smallest possible measure 
 //(area for 2D or volume for 3D) for a given geometry or a set of points
 //
@@ -22051,7 +21241,7 @@ BoundingBox.prototype.contains = function(p) {
 module.exports = BoundingBox;
 
 
-},{"./Vec3":228}],214:[function(require,module,exports){
+},{"./Vec3":216}],202:[function(require,module,exports){
 //A collection of vertices, vertex attributes and faces or edges defining a 3d shape.
 //(area for 2D or volume for 3D) for a given geometry or a set of points
 //
@@ -23107,7 +22297,7 @@ function move(a, b, t) {
 
 module.exports = Geometry;
 
-},{"./BoundingBox":213,"./Ray":220,"./Vec3":228}],215:[function(require,module,exports){
+},{"./BoundingBox":201,"./Ray":208,"./Vec3":216}],203:[function(require,module,exports){
 //A 4 by 4 Matrix
 //## Example use
 //     var mat4 = new Mat4()
@@ -23580,7 +22770,7 @@ Mat4.prototype.fromArray = function(a) {
 module.exports = Mat4;
 
 
-},{"./Vec3":228}],216:[function(require,module,exports){
+},{"./Vec3":216}],204:[function(require,module,exports){
 //3D Three data structure for fast spatial point indexing
 //## Example use
 //      var octree = new Octree(new Vec3(-1,-1,1), new Vec3(2,2,2));
@@ -23882,7 +23072,7 @@ Octree.Cell.prototype.findNearbyPoints = function (p, r, result, options) {
 
 module.exports = Octree;
 
-},{"pex-geom":212}],217:[function(require,module,exports){
+},{"pex-geom":200}],205:[function(require,module,exports){
 //Path of points
 //
 //## Example use
@@ -24047,7 +23237,7 @@ Path.prototype.precalculateLength = function() {
 module.exports = Path;
 
 
-},{"./Vec3":228}],218:[function(require,module,exports){
+},{"./Vec3":216}],206:[function(require,module,exports){
 //A plane represented by a point and a normal vector perpendicular to the plane's surface.
 //
 //Methematical construct not a 3d geometry mesh.
@@ -24144,7 +23334,7 @@ Plane.prototype.updateUV = function() {
 }
 
 module.exports = Plane;
-},{"./Vec2":227,"./Vec3":228}],219:[function(require,module,exports){
+},{"./Vec2":215,"./Vec3":216}],207:[function(require,module,exports){
 //A Quaternion (x, y, z, w)
 //## Example use
 //     var q = new Quat().fromDirection(new Vec3(1, 1, 1));
@@ -24483,7 +23673,7 @@ Quat.fromDirection = function(direction) {
 
 module.exports = Quat;
 
-},{"./Mat4":215,"./Vec3":228}],220:[function(require,module,exports){
+},{"./Mat4":203,"./Vec3":216}],208:[function(require,module,exports){
 //A ray.
 //
 //Consists of the starting point *origin* and the *direction* vector.  
@@ -24705,7 +23895,7 @@ Ray.prototype.hitTestTriangle = function(triangle) {
 
 module.exports = Ray;
 
-},{"./Vec3":228}],221:[function(require,module,exports){
+},{"./Vec3":216}],209:[function(require,module,exports){
 //2D Rect (x, y, width, height) or (min, max)
 //## Example use
 //      var rect = new Rect(new Vec2(-1, -1), new Vec2(1, 1));
@@ -24853,7 +24043,7 @@ Rect.fromPoints = function(points) {
 }
 
 module.exports = Rect;
-},{"pex-geom":212}],222:[function(require,module,exports){
+},{"pex-geom":200}],210:[function(require,module,exports){
 //Camtull-Rom spline implementation  
 //Inspired by code from [Tween.js][1]
 //[1]: http://sole.github.com/tween.js/examples/05_spline.html
@@ -25052,7 +24242,7 @@ Spline1D.prototype.interpolate = function(p0, p1, p2, p3, t) {
 
 module.exports = Spline1D;
 
-},{}],223:[function(require,module,exports){
+},{}],211:[function(require,module,exports){
 //Camtull-Rom spline implementation  
 //Inspired by code from [Tween.js][1]
 //[1]: http://sole.github.com/tween.js/examples/05_spline.html
@@ -25259,7 +24449,7 @@ Spline2D.prototype.interpolate = function (p0, p1, p2, p3, t) {
 };
 
 module.exports = Spline2D;
-},{"./Vec2":227}],224:[function(require,module,exports){
+},{"./Vec2":215}],212:[function(require,module,exports){
 //Camtull-Rom spline implementation  
 //Inspired by code from [Tween.js][1]
 //[1]: http://sole.github.com/tween.js/examples/05_spline.html
@@ -25475,7 +24665,7 @@ Spline3D.prototype.interpolate = function (p0, p1, p2, p3, t) {
 };
 
 module.exports = Spline3D;
-},{"./Vec3":228}],225:[function(require,module,exports){
+},{"./Vec3":216}],213:[function(require,module,exports){
 //2D triangle.
 //
 //Consists of three 2D points: a, b, c
@@ -25525,7 +24715,7 @@ function sign(a, b, c) {
 }
 
 module.exports = Triangle2D;
-},{}],226:[function(require,module,exports){
+},{}],214:[function(require,module,exports){
 //3D triangle.
 //
 //Consists of three 3D points: a, b, c
@@ -25559,7 +24749,7 @@ Triangle3D.prototype.getArea = function() {
 }
 
 module.exports = Triangle3D;
-},{}],227:[function(require,module,exports){
+},{}],215:[function(require,module,exports){
 //2D Vector (x, y)
 //## Example use
 //      var position = new Vec2(0, 0);
@@ -25826,7 +25016,7 @@ Vec2.prototype.hash = function() {
 
 module.exports = Vec2;
 
-},{}],228:[function(require,module,exports){
+},{}],216:[function(require,module,exports){
 //3D Vector (x, y, z)
 //## Example use
 //      var right = new Vec3(0, 1, 0);
@@ -26139,7 +25329,7 @@ Vec3.Zero = new Vec3(0, 0, 0);
 
 module.exports = Vec3;
 
-},{}],229:[function(require,module,exports){
+},{}],217:[function(require,module,exports){
 //4D Vector (x, y, z, w)
 //## Example use
 //      var a = new Vec4(0.2, 0.4, 3.3, 1.0);
@@ -26241,7 +25431,7 @@ Vec4.prototype.hash = function() {
 
 module.exports = Vec4;
 
-},{}],230:[function(require,module,exports){
+},{}],218:[function(require,module,exports){
 module.exports.Context = require('./lib/Context');
 module.exports.Texture = require('./lib/Texture');
 module.exports.Texture2D = require('./lib/Texture2D');
@@ -26262,7 +25452,7 @@ for(var funcName in Utils) {
 }
 
 
-},{"./lib/Arcball":231,"./lib/Context":233,"./lib/Material":234,"./lib/Mesh":235,"./lib/OrthographicCamera":236,"./lib/PerspectiveCamera":237,"./lib/Program":238,"./lib/RenderTarget":239,"./lib/ScreenImage":241,"./lib/Texture":242,"./lib/Texture2D":243,"./lib/TextureCube":244,"./lib/Utils":245}],231:[function(require,module,exports){
+},{"./lib/Arcball":219,"./lib/Context":221,"./lib/Material":222,"./lib/Mesh":223,"./lib/OrthographicCamera":224,"./lib/PerspectiveCamera":225,"./lib/Program":226,"./lib/RenderTarget":227,"./lib/ScreenImage":229,"./lib/Texture":230,"./lib/Texture2D":231,"./lib/TextureCube":232,"./lib/Utils":233}],219:[function(require,module,exports){
 var geom = require('pex-geom');
 var Vec2 = geom.Vec2;
 var Vec3 = geom.Vec3;
@@ -26425,7 +25615,7 @@ Arcball.prototype.setDistance = function(distance) {
 };
 
 module.exports = Arcball;
-},{"pex-geom":212}],232:[function(require,module,exports){
+},{"pex-geom":200}],220:[function(require,module,exports){
 var geom = require('pex-geom');
 var Vec2 = geom.Vec2;
 var Vec3 = geom.Vec3;
@@ -26586,7 +25776,7 @@ Buffer.prototype.update = function(data, usage) {
 
 module.exports = Buffer;
 
-},{"./Context":233,"pex-color":177,"pex-geom":212}],233:[function(require,module,exports){
+},{"./Context":221,"pex-color":165,"pex-geom":200}],221:[function(require,module,exports){
 var sys = require('pex-sys');
 
 var currentGLContext = null;
@@ -26614,7 +25804,7 @@ Object.defineProperty(Context, 'currentContext', {
 });
 
 module.exports = Context;
-},{"pex-sys":272}],234:[function(require,module,exports){
+},{"pex-sys":260}],222:[function(require,module,exports){
 var Context = require('./Context');
 
 function Material(program, uniforms) {
@@ -26643,7 +25833,7 @@ Material.prototype.use = function () {
 };
 
 module.exports = Material;
-},{"./Context":233}],235:[function(require,module,exports){
+},{"./Context":221}],223:[function(require,module,exports){
 var merge = require('merge');
 var geom = require('pex-geom')
 var Context = require('./Context');
@@ -26930,7 +26120,7 @@ Mesh.prototype.updateBoundingBox = function() {
 
 module.exports = Mesh;
 
-},{"./Context":233,"./RenderableGeometry":240,"merge":176,"pex-geom":212}],236:[function(require,module,exports){
+},{"./Context":221,"./RenderableGeometry":228,"merge":164,"pex-geom":200}],224:[function(require,module,exports){
 var geom = require('pex-geom');
 var Vec2 = geom.Vec2;
 var Vec3 = geom.Vec3;
@@ -27081,7 +26271,7 @@ OrthographicCamera.prototype.getWorldRay = function(x, y, windowWidth, windowHei
 
 module.exports = OrthographicCamera;
 
-},{"pex-geom":212}],237:[function(require,module,exports){
+},{"pex-geom":200}],225:[function(require,module,exports){
 var geom = require('pex-geom');
 var Vec2 = geom.Vec2;
 var Vec3 = geom.Vec3;
@@ -27239,7 +26429,7 @@ PerspectiveCamera.prototype.getWorldRay = function(x, y, windowWidth, windowHeig
 
 module.exports = PerspectiveCamera;
 
-},{"pex-geom":212}],238:[function(require,module,exports){
+},{"pex-geom":200}],226:[function(require,module,exports){
 var Context = require('./Context');
 var sys = require('pex-sys');
 var IO = sys.IO;
@@ -27449,7 +26639,7 @@ Program.makeUniformSetter = function(gl, type, location) {
 };
 
 module.exports = Program;
-},{"./Context":233,"pex-sys":272}],239:[function(require,module,exports){
+},{"./Context":221,"pex-sys":260}],227:[function(require,module,exports){
 var Context = require('./Context');
 var Texture2D = require('./Texture2D');
 var merge = require('merge');
@@ -27602,7 +26792,7 @@ RenderTarget.prototype.getDepthAttachement = function() {
 
  module.exports = RenderTarget;
 
-},{"./Context":233,"./Texture2D":243,"merge":176,"pex-sys":272}],240:[function(require,module,exports){
+},{"./Context":221,"./Texture2D":231,"merge":164,"pex-sys":260}],228:[function(require,module,exports){
 var Geometry = require('pex-geom').Geometry;
 var Context = require('./Context');
 var Buffer = require('./Buffer');
@@ -27659,7 +26849,7 @@ var RenderableGeometry = {
 
 module.exports = RenderableGeometry;
 
-},{"./Buffer":232,"./Context":233,"pex-geom":212}],241:[function(require,module,exports){
+},{"./Buffer":220,"./Context":221,"pex-geom":200}],229:[function(require,module,exports){
 var geom = require('pex-geom');
 var Vec2 = geom.Vec2;
 var Geometry = geom.Geometry;
@@ -27764,7 +26954,7 @@ ScreenImage.prototype.draw = function (image, program) {
 };
 
 module.exports = ScreenImage;
-},{"./Material":234,"./Mesh":235,"./Program":238,"pex-geom":212}],242:[function(require,module,exports){
+},{"./Material":222,"./Mesh":223,"./Program":226,"pex-geom":200}],230:[function(require,module,exports){
 var Context = require('./Context');
 
 function Texture(target) {
@@ -27792,7 +26982,7 @@ Texture.prototype.bind = function(unit) {
 };
 
 module.exports = Texture;
-},{"./Context":233}],243:[function(require,module,exports){
+},{"./Context":221}],231:[function(require,module,exports){
 var sys = require('pex-sys');
 var merge = require('merge');
 var IO = sys.IO;
@@ -28010,7 +27200,7 @@ Texture2D.prototype.generateMipmap = function() {
 
 module.exports = Texture2D;
 
-},{"./Context":233,"./Texture":242,"merge":176,"pex-sys":272}],244:[function(require,module,exports){
+},{"./Context":221,"./Texture":230,"merge":164,"pex-sys":260}],232:[function(require,module,exports){
 var sys = require('pex-sys');
 var IO = sys.IO;
 var Platform = sys.Platform;
@@ -28105,7 +27295,7 @@ TextureCube.prototype.dispose = function () {
 
 module.exports = TextureCube;
 
-},{"./Context":233,"./Texture":242,"merge":176,"pex-sys":272}],245:[function(require,module,exports){
+},{"./Context":221,"./Texture":230,"merge":164,"pex-sys":260}],233:[function(require,module,exports){
 var Context = require('./Context');
 
 module.exports.getCurrentContext = function() {
@@ -28231,9 +27421,9 @@ module.exports.lineWidth = function(width) {
   gl.lineWidth(width);
   return this;
 }
-},{"./Context":233}],246:[function(require,module,exports){
+},{"./Context":221}],234:[function(require,module,exports){
 module.exports.GUI = require('./lib/GUI');
-},{"./lib/GUI":247}],247:[function(require,module,exports){
+},{"./lib/GUI":235}],235:[function(require,module,exports){
 var glu = require('pex-glu');
 var geom = require('pex-geom');
 var sys = require('pex-sys');
@@ -28873,7 +28063,7 @@ GUI.prototype.toggleEnabled = function() {
 
 module.exports = GUI;
 
-},{"./GUIControl":248,"./HTMLCanvasRenderer":249,"./SkiaRenderer":250,"pex-color":177,"pex-geom":212,"pex-glu":230,"pex-sys":272}],248:[function(require,module,exports){
+},{"./GUIControl":236,"./HTMLCanvasRenderer":237,"./SkiaRenderer":238,"pex-color":165,"pex-geom":200,"pex-glu":218,"pex-sys":260}],236:[function(require,module,exports){
 function GUIControl(o) {
   for (var i in o) {
     this[i] = o[i];
@@ -29067,7 +28257,7 @@ GUIControl.prototype.getStrValue = function() {
 
 module.exports = GUIControl;
 GUIControl;
-},{}],249:[function(require,module,exports){
+},{}],237:[function(require,module,exports){
 var glu = require('pex-glu');
 var geom = require('pex-geom');
 var plask = require('plask');
@@ -29337,7 +28527,7 @@ HTMLCanvasRenderer.prototype.updateTexture = function () {
 
 module.exports = HTMLCanvasRenderer;
 
-},{"pex-geom":212,"pex-glu":230,"plask":14}],250:[function(require,module,exports){
+},{"pex-geom":200,"pex-glu":218,"plask":2}],238:[function(require,module,exports){
 var glu = require('pex-glu');
 var geom = require('pex-geom');
 var plask = require('plask');
@@ -29677,7 +28867,7 @@ SkiaRenderer.prototype.updateTexture = function() {
 
 module.exports = SkiaRenderer;
 
-},{"pex-geom":212,"pex-glu":230,"plask":14}],251:[function(require,module,exports){
+},{"pex-geom":200,"pex-glu":218,"plask":2}],239:[function(require,module,exports){
 module.exports.SolidColor = require('./lib/SolidColor');
 module.exports.ShowNormals = require('./lib/ShowNormals');
 module.exports.ShowColors = require('./lib/ShowColors');
@@ -29694,7 +28884,7 @@ module.exports.MatCap = require('./lib/MatCap');
 module.exports.Diffuse = require('./lib/Diffuse');
 module.exports.BlinnPhong = require('./lib/BlinnPhong');
 module.exports.ShowDepth = require('./lib/ShowDepth');
-},{"./lib/BlinnPhong":252,"./lib/Diffuse":253,"./lib/FlatToonShading":254,"./lib/MatCap":255,"./lib/ShowColors":256,"./lib/ShowDepth":257,"./lib/ShowNormals":258,"./lib/ShowPosition":259,"./lib/ShowTexCoords":260,"./lib/SkyBox":261,"./lib/SkyBoxEnvMap":262,"./lib/SolidColor":263,"./lib/Textured":264,"./lib/TexturedCubeMap":265,"./lib/TexturedEnvMap":266,"./lib/TexturedTriPlanar":267}],252:[function(require,module,exports){
+},{"./lib/BlinnPhong":240,"./lib/Diffuse":241,"./lib/FlatToonShading":242,"./lib/MatCap":243,"./lib/ShowColors":244,"./lib/ShowDepth":245,"./lib/ShowNormals":246,"./lib/ShowPosition":247,"./lib/ShowTexCoords":248,"./lib/SkyBox":249,"./lib/SkyBoxEnvMap":250,"./lib/SolidColor":251,"./lib/Textured":252,"./lib/TexturedCubeMap":253,"./lib/TexturedEnvMap":254,"./lib/TexturedTriPlanar":255}],240:[function(require,module,exports){
 var glu = require('pex-glu');
 var color = require('pex-color');
 var geom = require('pex-geom');
@@ -29729,7 +28919,7 @@ BlinnPhong.prototype = Object.create(Material.prototype);
 
 module.exports = BlinnPhong;
 
-},{"merge":176,"pex-color":177,"pex-geom":212,"pex-glu":230}],253:[function(require,module,exports){
+},{"merge":164,"pex-color":165,"pex-geom":200,"pex-glu":218}],241:[function(require,module,exports){
 var glu = require('pex-glu');
 var color = require('pex-color');
 var geom = require('pex-geom');
@@ -29760,7 +28950,7 @@ function Diffuse(uniforms) {
 Diffuse.prototype = Object.create(Material.prototype);
 
 module.exports = Diffuse;
-},{"merge":176,"pex-color":177,"pex-geom":212,"pex-glu":230}],254:[function(require,module,exports){
+},{"merge":164,"pex-color":165,"pex-geom":200,"pex-glu":218}],242:[function(require,module,exports){
 var glu = require('pex-glu');
 var color = require('pex-color');
 var geom = require('pex-geom');
@@ -29792,7 +28982,7 @@ function FlatToonShading(uniforms) {
 FlatToonShading.prototype = Object.create(Material.prototype);
 
 module.exports = FlatToonShading;
-},{"merge":176,"pex-color":177,"pex-geom":212,"pex-glu":230}],255:[function(require,module,exports){
+},{"merge":164,"pex-color":165,"pex-geom":200,"pex-glu":218}],243:[function(require,module,exports){
 //http://www.clicktorelease.com/blog/creating-spherical-environment-mapping-shader
 
 var glu = require('pex-glu');
@@ -29818,7 +29008,7 @@ MatCap.prototype = Object.create(Material.prototype);
 
 module.exports = MatCap;
 
-},{"merge":176,"pex-color":177,"pex-glu":230}],256:[function(require,module,exports){
+},{"merge":164,"pex-color":165,"pex-glu":218}],244:[function(require,module,exports){
 var glu = require('pex-glu');
 var color = require('pex-color');
 var Context = glu.Context;
@@ -29841,7 +29031,7 @@ function ShowColors(uniforms) {
 ShowColors.prototype = Object.create(Material.prototype);
 
 module.exports = ShowColors;
-},{"merge":176,"pex-color":177,"pex-glu":230}],257:[function(require,module,exports){
+},{"merge":164,"pex-color":165,"pex-glu":218}],245:[function(require,module,exports){
 var glu = require('pex-glu');
 var color = require('pex-color');
 var geom = require('pex-geom');
@@ -29869,7 +29059,7 @@ function ShowDepth(uniforms) {
 ShowDepth.prototype = Object.create(Material.prototype);
 
 module.exports = ShowDepth;
-},{"merge":176,"pex-color":177,"pex-geom":212,"pex-glu":230}],258:[function(require,module,exports){
+},{"merge":164,"pex-color":165,"pex-geom":200,"pex-glu":218}],246:[function(require,module,exports){
 var glu = require('pex-glu');
 var color = require('pex-color');
 var Context = glu.Context;
@@ -29892,7 +29082,7 @@ function ShowNormals(uniforms) {
 ShowNormals.prototype = Object.create(Material.prototype);
 
 module.exports = ShowNormals;
-},{"merge":176,"pex-color":177,"pex-glu":230}],259:[function(require,module,exports){
+},{"merge":164,"pex-color":165,"pex-glu":218}],247:[function(require,module,exports){
 var glu = require('pex-glu');
 var color = require('pex-color');
 var geom = require('pex-geom');
@@ -29918,7 +29108,7 @@ function ShowPosition(uniforms) {
 ShowPosition.prototype = Object.create(Material.prototype);
 
 module.exports = ShowPosition;
-},{"merge":176,"pex-color":177,"pex-geom":212,"pex-glu":230}],260:[function(require,module,exports){
+},{"merge":164,"pex-color":165,"pex-geom":200,"pex-glu":218}],248:[function(require,module,exports){
 var glu = require('pex-glu');
 var color = require('pex-color');
 var geom = require('pex-geom');
@@ -29944,7 +29134,7 @@ function ShowTexCoords(uniforms) {
 ShowTexCoords.prototype = Object.create(Material.prototype);
 
 module.exports = ShowTexCoords;
-},{"merge":176,"pex-color":177,"pex-geom":212,"pex-glu":230}],261:[function(require,module,exports){
+},{"merge":164,"pex-color":165,"pex-geom":200,"pex-glu":218}],249:[function(require,module,exports){
 var glu = require('pex-glu');
 var color = require('pex-color');
 var Context = glu.Context;
@@ -29968,7 +29158,7 @@ SkyBox.prototype = Object.create(Material.prototype);
 
 module.exports = SkyBox;
 
-},{"merge":176,"pex-color":177,"pex-glu":230}],262:[function(require,module,exports){
+},{"merge":164,"pex-color":165,"pex-glu":218}],250:[function(require,module,exports){
 var glu = require('pex-glu');
 var color = require('pex-color');
 var Context = glu.Context;
@@ -29992,7 +29182,7 @@ SkyBoxEnvMap.prototype = Object.create(Material.prototype);
 
 module.exports = SkyBoxEnvMap;
 
-},{"merge":176,"pex-color":177,"pex-glu":230}],263:[function(require,module,exports){
+},{"merge":164,"pex-color":165,"pex-glu":218}],251:[function(require,module,exports){
 var glu = require('pex-glu');
 var color = require('pex-color');
 var Context = glu.Context;
@@ -30019,7 +29209,7 @@ function SolidColor(uniforms) {
 SolidColor.prototype = Object.create(Material.prototype);
 
 module.exports = SolidColor;
-},{"merge":176,"pex-color":177,"pex-glu":230}],264:[function(require,module,exports){
+},{"merge":164,"pex-color":165,"pex-glu":218}],252:[function(require,module,exports){
 var glu = require('pex-glu');
 var color = require('pex-color');
 var geom = require('pex-geom');
@@ -30049,7 +29239,7 @@ Textured.prototype = Object.create(Material.prototype);
 
 module.exports = Textured;
 
-},{"merge":176,"pex-color":177,"pex-geom":212,"pex-glu":230}],265:[function(require,module,exports){
+},{"merge":164,"pex-color":165,"pex-geom":200,"pex-glu":218}],253:[function(require,module,exports){
 var glu = require('pex-glu');
 var color = require('pex-color');
 var sys = require('pex-sys');
@@ -30088,7 +29278,7 @@ TexturedCubeMap.prototype = Object.create(Material.prototype);
 
 module.exports = TexturedCubeMap;
 
-},{"merge":176,"pex-color":177,"pex-glu":230,"pex-sys":272}],266:[function(require,module,exports){
+},{"merge":164,"pex-color":165,"pex-glu":218,"pex-sys":260}],254:[function(require,module,exports){
 var glu = require('pex-glu');
 var color = require('pex-color');
 var Context = glu.Context;
@@ -30112,7 +29302,7 @@ TexturedEnvMap.prototype = Object.create(Material.prototype);
 
 module.exports = TexturedEnvMap;
 
-},{"merge":176,"pex-color":177,"pex-glu":230}],267:[function(require,module,exports){
+},{"merge":164,"pex-color":165,"pex-glu":218}],255:[function(require,module,exports){
 var glu = require('pex-glu');
 var color = require('pex-color');
 var geom = require('pex-geom');
@@ -30140,9 +29330,9 @@ TexturedTriPlanar.prototype = Object.create(Material.prototype);
 
 module.exports = TexturedTriPlanar;
 
-},{"merge":176,"pex-color":177,"pex-geom":212,"pex-glu":230}],268:[function(require,module,exports){
+},{"merge":164,"pex-color":165,"pex-geom":200,"pex-glu":218}],256:[function(require,module,exports){
 module.exports = require('./lib/Random');
-},{"./lib/Random":269}],269:[function(require,module,exports){
+},{"./lib/Random":257}],257:[function(require,module,exports){
 var seedrandom = require('seedrandom');
 var geom = require('pex-geom');
 var SimplexNoise = require('simplex-noise');
@@ -30235,7 +29425,7 @@ Random.noise4 = function(x, y, z, w) {
 };
 
 module.exports = Random;
-},{"pex-geom":212,"seedrandom":270,"simplex-noise":271}],270:[function(require,module,exports){
+},{"pex-geom":200,"seedrandom":258,"simplex-noise":259}],258:[function(require,module,exports){
 /**
 
 seedrandom.js
@@ -30679,7 +29869,7 @@ if (module && module.exports) {
   'random'// rngname: name for Math.random and Math.seedrandom
 );
 
-},{"crypto":19}],271:[function(require,module,exports){
+},{"crypto":7}],259:[function(require,module,exports){
 /*
  * A fast javascript implementation of simplex noise by Jonas Wagner
  *
@@ -31087,13 +30277,13 @@ if (typeof module !== 'undefined') {
 
 })();
 
-},{}],272:[function(require,module,exports){
+},{}],260:[function(require,module,exports){
 module.exports.Platform = require('./lib/Platform');
 module.exports.Window = require('./lib/Window');
 module.exports.Time = require('./lib/Time');
 module.exports.IO = require('./lib/IO');
 module.exports.Log = require('./lib/Log');
-},{"./lib/IO":274,"./lib/Log":275,"./lib/Platform":276,"./lib/Time":277,"./lib/Window":278}],273:[function(require,module,exports){
+},{"./lib/IO":262,"./lib/Log":263,"./lib/Platform":264,"./lib/Time":265,"./lib/Window":266}],261:[function(require,module,exports){
 var Platform = require('./Platform');
 var Log = require('./Log');
 var merge = require('merge');
@@ -31441,7 +30631,7 @@ var BrowserWindow = { simpleWindow: simpleWindow };
 
 module.exports = BrowserWindow;
 
-},{"./Log":275,"./Platform":276,"merge":176}],274:[function(require,module,exports){
+},{"./Log":263,"./Platform":264,"merge":164}],262:[function(require,module,exports){
 (function (process){
 var Platform = require('./Platform');
 var Log = require('./Log');
@@ -31579,7 +30769,7 @@ var WebIO = function () {
 if (Platform.isPlask) module.exports = PlaskIO();
 else if (Platform.isBrowser) module.exports = WebIO();
 }).call(this,require('_process'))
-},{"./Log":275,"./Platform":276,"_process":160,"merge":176,"path":159,"plask":14}],275:[function(require,module,exports){
+},{"./Log":263,"./Platform":264,"_process":148,"merge":164,"path":147,"plask":2}],263:[function(require,module,exports){
 function Log() {
 }
 
@@ -31598,7 +30788,7 @@ Log.error = function(msg) {
 };
 
 module.exports = Log;
-},{}],276:[function(require,module,exports){
+},{}],264:[function(require,module,exports){
 (function (process){
 module.exports.isPlask = typeof window === 'undefined' && typeof process === 'object';
 module.exports.isBrowser = typeof window === 'object' && typeof document === 'object';
@@ -31606,7 +30796,7 @@ module.exports.isEjecta = typeof ejecta === 'object' && typeof ejecta.include ==
 module.exports.isiOS = module.exports.isBrowser && typeof navigator === 'object' && /(iPad|iPhone|iPod)/g.test( navigator.userAgent );
 module.exports.isMobile = module.exports.isiOS;
 }).call(this,require('_process'))
-},{"_process":160}],277:[function(require,module,exports){
+},{"_process":148}],265:[function(require,module,exports){
 var Log = require('./Log');
 
 var Time = {
@@ -31690,7 +30880,7 @@ Time.reset = function() {
 }
 
 module.exports = Time;
-},{"./Log":275}],278:[function(require,module,exports){
+},{"./Log":263}],266:[function(require,module,exports){
 var Platform = require('./Platform');
 var BrowserWindow = require('./BrowserWindow');
 var Time = require('./Time');
@@ -31769,9 +30959,855 @@ var Window = {
 
 module.exports = Window;
 
-},{"./BrowserWindow":273,"./Log":275,"./Platform":276,"./Time":277,"merge":176,"plask":14}],279:[function(require,module,exports){
-arguments[4][233][0].apply(exports,arguments)
-},{"dup":233,"pex-sys":272}],280:[function(require,module,exports){
+},{"./BrowserWindow":261,"./Log":263,"./Platform":264,"./Time":265,"merge":164,"plask":2}],267:[function(require,module,exports){
+var Program = require('pex-glu').Program;
+var FBO = require('pex-glu').RenderTarget;
+var FrameRenderer = require('./FrameRenderer');
+var Color = require('pex-color').Color;
+var Vec2 = require('pex-geom').Vec2;
+var Vec3 = require('pex-geom').Vec3;
+var Vec4 = require('pex-geom').Vec4;
+
+var glu = require('pex-glu');
+
+var shader = "#ifdef VERT\n\nattribute vec2 position;\nattribute vec2 texCoord;\nuniform vec2 screenSize;\nuniform vec2 pixelPosition;\nuniform vec2 pixelSize;\nvarying vec2 tc;\n\nvoid main() {\n  float tx = position.x * 0.5 + 0.5; //-1 -> 0, 1 -> 1\n  float ty = -position.y * 0.5 + 0.5; //-1 -> 1, 1 -> 0\n  //(x + 0)/sw * 2 - 1, (x + w)/sw * 2 - 1\n  float x = (pixelPosition.x + pixelSize.x * tx)/screenSize.x * 2.0 - 1.0;  //0 -> -1, 1 -> 1\n  //1.0 - (y + h)/sh * 2, 1.0 - (y + h)/sh * 2\n  float y = 1.0 - (pixelPosition.y + pixelSize.y * ty)/screenSize.y * 2.0;  //0 -> 1, 1 -> -1\n  gl_Position = vec4(x, y, 0.0, 1.0);\n  tc = texCoord;\n}\n\n#endif\n\n#ifdef FRAG\n\nuniform vec2 Point;\nuniform float\tRadius;\nuniform float\tEdgeSmooth;\nuniform vec4 Value;\nuniform float Width;\nuniform float Height;\nvarying vec2 tc;\n\nvoid main(){\n  vec2 texelSize = vec2(Width, Height);\n  vec2 tcs = tc * texelSize;\n  vec4 color = Value;\n  float d = distance(Point, tcs);\n  float a = max((Radius - d) / Radius, 0.0);\n  float c = ceil(a);\n  color.xyz *= c;\n  color.w *= pow(a, EdgeSmooth + 0.1);\n  gl_FragColor = color;\n}\n\n#endif\n\n";
+
+module.exports = DrawForce;
+
+function DrawForce (options) {
+  this.width = options.width;
+  this.height = options.height;
+  this.type = options.type;
+  this.isTemporary = options.isTemporary;
+  this.radius = 0.05;
+  this.strength = 2.5;
+  this.force = new Vec3(0.3, 0.7, 0.9);
+  this.edge = 1;
+
+  this.forceBuffer = new FBO(this.width, this.height, { bpp: 32 });
+  this.density = new Color(1, 1, 1, 1);
+  this.velocity = new Vec2(0,0);
+
+
+  this.forceChanged = false;
+  this.forceApplied = false;
+
+  this._program = new Program(shader);
+  this._frameRenderer = new FrameRenderer(0, 0, this.width, this.height,
+                                                this.width, this.height);
+
+}
+
+DrawForce.prototype.applyForce = function (normalizedPos) {
+  var absPos = normalizedPos.dup();
+  absPos.x *= this.width;
+  absPos.y *= this.height;
+  var absRadius = this.radius * this.width;
+
+  // && allow for multiple temporal forces
+  if (this.isTemporary && !this.forceApplied) this.clear();
+
+  var typeForce = this.force.clone();
+  if (this.type === 'velocity') {
+    typeForce.x *= this.width;
+    typeForce.y *= this.width;
+  }
+
+  var value = new Vec4(typeForce.x, typeForce.y, typeForce.z, 1.0);
+  glu.enableAlphaBlending();
+  this.forceBuffer.bind();
+  this._program.use();
+  // vert
+  this._program.uniforms.screenSize(new Vec2(this.width, this.height));
+  this._program.uniforms.pixelPosition(new Vec2(0, 0));
+  this._program.uniforms.pixelSize(new Vec2(this.width, this.height));
+  // frag
+  this._program.uniforms.Point(absPos);
+  this._program.uniforms.Width(this.width);
+  this._program.uniforms.Height(this.height);
+  this._program.uniforms.Radius(absRadius);
+  this._program.uniforms.EdgeSmooth(this.edge);
+  this._program.uniforms.Value(value);
+  this._frameRenderer.draw(this._program);
+  this.forceBuffer.unbind();
+  glu.enableBlending(false);
+
+  this.forceApplied = true;
+}
+
+DrawForce.prototype.clear = function () {
+  this.forceBuffer.bind();
+  glu.clearColor(Color.Black);
+  this.forceBuffer.unbind();
+}
+
+DrawForce.prototype.update = function () {
+  if      (this.forceApplied) this.forceChanged = true;
+  else if (this.isTemporary)  this.forceChanged = false;
+  this.forceApplied = false;
+}
+
+
+
+},{"./FrameRenderer":268,"pex-color":165,"pex-geom":200,"pex-glu":218}],268:[function(require,module,exports){
+var geom = require('pex-geom');
+var Vec2 = geom.Vec2;
+var Geometry = geom.Geometry;
+var glu = require('pex-glu');
+var Program = glu.Program;
+var Material = glu.Material;
+var Mesh = glu.Mesh;
+
+
+var shader = "#ifdef VERT\n\nattribute vec2 position;\nattribute vec2 texCoord;\nuniform vec2 screenSize;\nuniform vec2 pixelPosition;\nuniform vec2 pixelSize;\nvarying vec2 vTexCoord;\n\nvoid main() {\n  float tx = position.x * 0.5 + 0.5; //-1 -> 0, 1 -> 1\n  float ty = -position.y * 0.5 + 0.5; //-1 -> 1, 1 -> 0\n  //(x + 0)/sw * 2 - 1, (x + w)/sw * 2 - 1\n  float x = (pixelPosition.x + pixelSize.x * tx)/screenSize.x * 2.0 - 1.0;  //0 -> -1, 1 -> 1\n  //1.0 - (y + h)/sh * 2, 1.0 - (y + h)/sh * 2\n  float y = 1.0 - (pixelPosition.y + pixelSize.y * ty)/screenSize.y * 2.0;  //0 -> 1, 1 -> -1\n  gl_Position = vec4(x, y, 0.0, 1.0); \n  //gl_Position = vec4(position.xy, 0.0, 1.0);\n\n  vTexCoord = texCoord;\n}\n\n#endif\n\n#ifdef FRAG\n\nvarying vec2 vTexCoord;\nuniform sampler2D image;\nuniform float alpha;\n\nvoid main() {\n  gl_FragColor = texture2D(image, vTexCoord);\n  gl_FragColor.a *= alpha;\n}\n\n#endif\n\n";
+
+function FrameRenderer(x, y, w, h, screenWidth, screenHeight) {
+  x = x !== undefined ? x : 0;
+  y = y !== undefined ? y : 0;
+  w = w !== undefined ? w : 1;
+  h = h !== undefined ? h : 1;
+  screenWidth = screenWidth !== undefined ? screenWidth : 1;
+  screenHeight = screenHeight !== undefined ? screenHeight : 1;
+  var program = new Program(shader);
+  var uniforms = {
+    screenSize: Vec2.create(screenWidth, screenHeight),
+    pixelPosition: Vec2.create(x, y),
+    pixelSize: Vec2.create(w, h),
+    alpha: 1
+  };
+  var material = new Material(program, uniforms);
+  var vertices = [
+    new Vec2(-1, 1),
+    new Vec2(-1, -1),
+    new Vec2(1, -1),
+    new Vec2(1, 1)
+  ];
+//  var vertices = [
+//    new Vec2(-0.9, 0.9),
+//    new Vec2(-0.9, -0.9),
+//    new Vec2(0.9, -0.9),
+//    new Vec2(0.9, 0.9)
+//  ];
+  var texCoords = [
+    new Vec2(0, 1),
+    new Vec2(0, 0),
+    new Vec2(1, 0),
+    new Vec2(1, 1)
+  ];
+  var geometry = new Geometry({
+    vertices: vertices,
+    texCoords: texCoords,
+    faces: true
+  });
+  // 0----3  0,1   1,1
+  // | \  |      u
+  // |  \ |      v
+  // 1----2  0,0   0,1
+  geometry.faces.push([0, 1, 2]);
+  geometry.faces.push([0, 2, 3]);
+  this.mesh = new Mesh(geometry, material);
+}
+
+FrameRenderer.prototype.setAlpha = function (alpha) {
+  this.mesh.material.uniforms.alpha = alpha;
+};
+
+FrameRenderer.prototype.setPosition = function (position) {
+  this.mesh.material.uniforms.pixelPosition = position;
+};
+
+FrameRenderer.prototype.setSize = function (size) {
+  this.mesh.material.uniforms.pixelSize = size;
+};
+
+FrameRenderer.prototype.setScreenSize = function (size) {
+  this.mesh.material.uniforms.screenSize = size;
+};
+
+FrameRenderer.prototype.setBounds = function (bounds) {
+  this.mesh.material.uniforms.pixelPosition.x = bounds.x;
+  this.mesh.material.uniforms.pixelPosition.y = bounds.y;
+  this.mesh.material.uniforms.pixelSize.x = bounds.width;
+  this.mesh.material.uniforms.pixelSize.y = bounds.height;
+};
+
+FrameRenderer.prototype.draw = function (program) {
+  this.mesh.setProgram(program);
+  this.mesh.draw();
+};
+
+module.exports = FrameRenderer;
+
+},{"pex-geom":200,"pex-glu":218}],269:[function(require,module,exports){
+var glu = require('pex-glu');
+var FBO = glu.RenderTarget;
+
+function PingPong (options) {
+  var options = options || {};
+  this.width = options.width || 512;
+  this.height = options.height || 512;
+  this.fboOpts = options.fboOpts || {};
+
+  this.sourceBuffer = new FBO(this.width, this.height, this.fboOpts);
+  this.destBuffer = new FBO(this.width, this.height, this.fboOpts);
+}
+
+PingPong.prototype.swap = function () {
+  var temp = this.sourceBuffer;
+  this.sourceBuffer = this.destBuffer;
+  this.destBuffer = temp;
+}
+
+PingPong.prototype.clear = function () {
+  this.sourceBuffer.bindAndClear();
+  this.sourceBuffer.unbind();
+  this.destBuffer.bindAndClear();
+  this.destBuffer.unbind();
+}
+
+module.exports = PingPong;
+
+
+},{"pex-glu":218}],270:[function(require,module,exports){
+var glu = require('pex-glu');
+var Context = glu.Context;
+var Program = glu.Program;
+var FBO = glu.RenderTarget;
+var Texture2D = glu.Texture2D;
+var ScreenImage = glu.ScreenImage;
+var Color = require('pex-color').Color;
+var Material = require('../pex-hacks/Material.js');
+var merge = require('merge');
+var sys = require('pex-sys');
+
+var PingPong = require('./PingPong.js');
+//Shaders
+var AdvectShader = require('./shaders/AdvectShader.js');
+var ClampLengthShader = require('./shaders/ClampLengthShader.js');
+var DiffuseShader = require('./shaders/DiffuseShader.js');
+var DivergenceShader = require('./shaders/DivergenceShader.js');
+var JacobiShader = require('./shaders/JacobiShader.js');
+var AddForceShader = require('./shaders/AddForceShader.js');
+var SubstractGradientShader = require('./shaders/SubstractGradientShader.js');
+var FrameRenderer = require('./FrameRenderer.js');
+
+function Fluid(simWidth, simHeight, drawWidth, drawHeight) {
+
+  // Fluid variables
+  this.width = simWidth;
+  this.height = simHeight;
+  this.drawWidth = drawWidth;
+  this.drawHeight = drawHeight;
+  this.iterations = 40;       // 1 to 100
+  this.speed = 28;            // 0 to 100
+  this.cellSize = 1.25;       // 0.0 to 2.0
+  this.viscosity = 0.5;       // 0 to 1
+  this.dissipation = 0.0017;   // 0 to 0.02
+  this.clampForce = 0.07;     // 0 to 0.1
+  this.maxDensity = 4.25;      // 0 to 5
+  this.maxVelocity = 4;       // 0 to 10
+  //-----------------------------
+
+  this.frameRenderer = new FrameRenderer(0, 0, this.width, this.height,
+                                                this.width, this.height);
+
+  this.densityFrameRenderer = new FrameRenderer(0, 0, drawWidth, drawHeight,
+                                                      drawWidth, drawHeight);
+  var gl = Context.currentContext;
+
+  // Buffers
+  this.densityPingPong  = new PingPong({
+    width: drawWidth
+  , height: drawHeight
+  , fboOpts: { format: gl.RGBA, bpp: 32 }
+  });
+  this.densityPingPong.clear();
+
+  this.velocityPingPong = new PingPong({
+    width: this.width
+  , height: this.height
+  , fboOpts: { format: gl.RGBA, bpp: 32 }
+  });
+  this.velocityPingPong.clear();
+  this.pressurePingPong = new PingPong({width: this.width,
+                                        height: this.height});
+  this.pressurePingPong.clear();
+
+  this.divergenceBuffer = new FBO(this.width, this.height, { bpp: 32 });
+  this.divergenceBuffer.bindAndClear();
+  this.divergenceBuffer.unbind();
+  this.obstacleBuffer = new FBO(this.width, this.height, { bpp: 32 });
+  this.obstacleBuffer.bindAndClear();
+  this.obstacleBuffer.unbind();
+  this.pressureBuffer = new FBO(this.width, this.height, { bpp: 32 });
+  this.pressureBuffer.bindAndClear();
+  this.pressureBuffer.unbind();
+  this.comboObstacleBuffer = new FBO(this.width, this.height, { bpp: 32 });
+  this.comboObstacleBuffer.bindAndClear();
+  this.comboObstacleBuffer.unbind();
+
+  // Shaders
+  this.clampLengthShader = new ClampLengthShader(this.width, this.height);
+  this.advectShader = new AdvectShader(this.width, this.height);
+  this.diffuseShader = new DiffuseShader(this.width, this.height);
+  this.divergenceShader = new DivergenceShader(this.width, this.height);
+  this.jacobiShader = new JacobiShader(this.width, this.height);
+  this.addForceShader = new AddForceShader(this.width, this.height);
+  this.substractGradientShader = new SubstractGradientShader(this.width, this.height);
+
+}
+
+Fluid.prototype.addDensity = function (options) {
+  glu.viewport(0, 0, this.drawWidth, this.drawHeight);
+  var texture = options.texture;
+  var strength = options.strength;
+  glu.enableBlending(false);
+  this.addForceShader.update({
+    destBuffer: this.densityPingPong.destBuffer
+  , backBufferTex: this.densityPingPong.sourceBuffer.getColorAttachment(0)
+  , addTex: texture
+  , force: strength
+  , frameRenderer: this.densityFrameRenderer
+  });
+  this.densityPingPong.swap();
+}
+
+Fluid.prototype.addVelocity = function (options) {
+  glu.viewport(0, 0, this.width, this.height);
+  var texture = options.texture;
+  var strength = options.strength;
+  glu.enableBlending(false);
+  this.addForceShader.update({
+    destBuffer: this.velocityPingPong.destBuffer
+  , backBufferTex: this.velocityPingPong.sourceBuffer.getColorAttachment(0)
+  , addTex: texture
+  , force: strength
+  , frameRenderer: this.frameRenderer
+  });
+  this.velocityPingPong.swap();
+}
+
+Fluid.prototype.iterate = function () {
+  this.deltaTime = sys.Time.delta;
+  this.timeStep = this.deltaTime * this.speed;
+
+  glu.enableBlending(false);
+
+  // Clamp Length
+  if (this.maxDensity > 0) {
+    glu.viewport(0, 0, this.drawWidth, this.drawHeight);
+    this.clampLengthShader.update({
+      destBuffer: this.densityPingPong.destBuffer
+    , backBufferTex: this.densityPingPong.sourceBuffer.getColorAttachment(0)
+    , max: this.maxDensity
+    , clampForce: this.clampForce
+    , frameRenderer: this.densityFrameRenderer
+    });
+    this.densityPingPong.swap();
+  }
+  if (this.maxVelocity > 0) {
+    glu.viewport(0, 0, this.width, this.height);
+    this.clampLengthShader.update({
+      destBuffer: this.velocityPingPong.destBuffer
+    , backBufferTex: this.velocityPingPong.sourceBuffer.getColorAttachment(0)
+    , max: this.maxVelocity
+    , clampForce: this.clampForce
+    , frameRenderer: this.frameRenderer
+    });
+    this.velocityPingPong.swap();
+  }
+
+   // Advect
+  glu.viewport(0, 0, this.width, this.height);
+  this.advectShader.update({
+    destBuffer: this.velocityPingPong.destBuffer
+  , backBufferTex: this.velocityPingPong.sourceBuffer.getColorAttachment(0)
+  , velocityTex: this.velocityPingPong.sourceBuffer.getColorAttachment(0)
+  , obstacleTex: this.comboObstacleBuffer.getColorAttachment(0)
+  , timeStep: this.timeStep
+  , dissipation: 1.0 - this.dissipation
+  , cellSize: this.cellSize
+  , frameRenderer: this.frameRenderer
+  });
+  this.velocityPingPong.swap();
+
+  glu.viewport(0, 0, this.drawWidth, this.drawHeight);
+  this.advectShader.update({
+    destBuffer: this.densityPingPong.destBuffer
+  , backBufferTex: this.densityPingPong.sourceBuffer.getColorAttachment(0)
+  , velocityTex: this.velocityPingPong.sourceBuffer.getColorAttachment(0)
+  , obstacleTex: this.comboObstacleBuffer.getColorAttachment(0)
+  , timeStep: this.timeStep
+  , dissipation: 1.0 - this.dissipation
+  , cellSize: this.cellSize
+  , frameRenderer: this.densityFrameRenderer
+  , type: 'density'
+  });
+  this.densityPingPong.swap();
+
+  // Diffuse
+  if (this.viscosity > 0) {
+  glu.viewport(0, 0, this.width, this.height);
+    for (var i=0; i<this.iterations; i++) {
+      this.diffuseShader.update({
+        destBuffer: this.velocityPingPong.destBuffer
+      , backBufferTex: this.velocityPingPong.sourceBuffer.getColorAttachment(0)
+      , obstacleTex: this.comboObstacleBuffer.getColorAttachment(0)
+      , viscosity: this.viscosity * this.deltaTime
+      , frameRenderer: this.frameRenderer
+      });
+      this.velocityPingPong.swap();
+    }
+  }
+
+  // Divergence and Jacobi
+  this.divergenceBuffer.bindAndClear();
+  this.divergenceBuffer.unbind();
+  glu.viewport(0, 0, this.width, this.height);
+  this.divergenceShader.update({
+    destBuffer: this.divergenceBuffer
+  , velocityTex: this.velocityPingPong.sourceBuffer.getColorAttachment(0)
+  , obstacleTex: this.comboObstacleBuffer.getColorAttachment(0)
+  , cellSize: this.cellSize
+  , frameRenderer: this.frameRenderer
+  });
+
+  this.pressurePingPong.clear();
+  glu.viewport(0, 0, this.width, this.height);
+  for (var i=0; i<this.iterations; i++){
+    this.jacobiShader.update({
+      destBuffer: this.pressurePingPong.destBuffer
+    , backBufferTex: this.pressurePingPong.sourceBuffer.getColorAttachment(0)
+    , obstacleTex: this.obstacleBuffer.getColorAttachment(0)
+    , divergenceTex: this.divergenceBuffer.getColorAttachment(0)
+    , cellSize: this.cellSize
+    , frameRenderer: this.frameRenderer
+    });
+    this.pressurePingPong.swap();
+  }
+
+  if (this.addPressureBufferDidChange) {
+    glu.viewport(0, 0, this.width, this.height);
+    this.addPressureBufferDidChange = false;
+    this.addForceShader.update({
+      destBuffer: this.pressurePingPong.destBuffer
+    , backBuffferTex: this.pressurePingPong.sourceBuffer.getColorAttachment(0)
+    , addTex: this.pressureBuffer.getColorAttachment(0)
+    , force: 1
+    , frameRenderer: this.frameRenderer
+    });
+    this.pressurePingPong.swap();
+  }
+
+  glu.viewport(0, 0, this.width, this.height);
+  this.substractGradientShader.update({
+    destBuffer: this.velocityPingPong.destBuffer
+   , backBufferTex: this.velocityPingPong.sourceBuffer.getColorAttachment(0)
+   , pressureTex: this.pressurePingPong.sourceBuffer.getColorAttachment(0)
+   , obstacleTex: this.comboObstacleBuffer.getColorAttachment(0)
+   , cellSize: this.cellSize
+   , frameRenderer: this.frameRenderer
+  });
+  this.velocityPingPong.swap();
+
+  return this.densityPingPong.destBuffer.getColorAttachment(0);
+
+}
+
+module.exports = Fluid;
+
+
+},{"../pex-hacks/Material.js":280,"./FrameRenderer.js":268,"./PingPong.js":269,"./shaders/AddForceShader.js":271,"./shaders/AdvectShader.js":272,"./shaders/ClampLengthShader.js":273,"./shaders/DiffuseShader.js":274,"./shaders/DivergenceShader.js":275,"./shaders/JacobiShader.js":276,"./shaders/SubstractGradientShader.js":277,"merge":164,"pex-color":165,"pex-glu":218,"pex-sys":260}],271:[function(require,module,exports){
+var glu = require('pex-glu');
+var Context = glu.Context;
+var Program = glu.Program;
+
+var Vec2 = require('pex-geom').Vec2;
+var shader = "#ifdef VERT\n\nattribute vec2 position;\nattribute vec2 texCoord;\nuniform vec2 screenSize;\nuniform vec2 pixelPosition;\nuniform vec2 pixelSize;\nvarying vec2 tc;\n\nvoid main() {\n  float tx = position.x * 0.5 + 0.5; //-1 -> 0, 1 -> 1\n  float ty = -position.y * 0.5 + 0.5; //-1 -> 1, 1 -> 0\n  //(x + 0)/sw * 2 - 1, (x + w)/sw * 2 - 1\n  float x = (pixelPosition.x + pixelSize.x * tx)/screenSize.x * 2.0 - 1.0;  //0 -> -1, 1 -> 1\n  //1.0 - (y + h)/sh * 2, 1.0 - (y + h)/sh * 2\n  float y = 1.0 - (pixelPosition.y + pixelSize.y * ty)/screenSize.y * 2.0;  //0 -> 1, 1 -> -1\n  gl_Position = vec4(x, y, 0.0, 1.0);\n  tc = texCoord;\n}\n\n#endif\n\n#ifdef FRAG\n\nuniform sampler2D Backbuffer;\nuniform sampler2D AddTexture;\nuniform float force;\nuniform vec2 Scale;\nvarying vec2 tc;\n\nvoid main(){\n  vec2 tc2 = tc * Scale;\n\n  vec4 color = texture2D(Backbuffer, tc) + texture2D(AddTexture, tc2) * force;\n  gl_FragColor = color;\n}\n\n#endif\n\n\n\n";
+
+function AddForceShader (width, height) {
+  this.width = width;
+  this.height = height;
+  this._program = new Program(shader);
+  this._program.use();
+}
+
+AddForceShader.prototype.update = function (options) {
+  var destBuffer = options.destBuffer
+    , backBufferTex = options.backBufferTex
+    , addTex = options.addTex
+    , force = options.force
+    , frameRenderer = options.frameRenderer;
+
+  if (!destBuffer) throw new Error("no destBuffer");
+  if (!backBufferTex) throw new Error("no backBufferTex");
+  if (!addTex) throw new Error("no velocityTex");
+  //if (!force) throw new Error("no obstacleTex");
+  if (!frameRenderer) throw new Error("no frameRenderer");
+
+  destBuffer.bind();
+  this._program.use();
+  //vert
+  this._program.uniforms.screenSize(new Vec2(this.width, this.height));
+  this._program.uniforms.pixelPosition(new Vec2(0, 0));
+  this._program.uniforms.pixelSize(new Vec2(this.width, this.height));
+  //frag
+  backBufferTex.bind(0);
+  this._program.uniforms.Backbuffer(0);
+  addTex.bind(1);
+  this._program.uniforms.AddTexture(1);
+  this._program.uniforms.force(force);
+  var scale = new Vec2(addTex.width / destBuffer.width,
+                        addTex.height / destBuffer.height);
+  this._program.uniforms.Scale(scale);
+  frameRenderer.draw(this._program);
+  destBuffer.unbind();
+
+}
+
+module.exports = AddForceShader;
+
+},{"pex-geom":200,"pex-glu":218}],272:[function(require,module,exports){
+var glu = require('pex-glu');
+var Context = glu.Context;
+var Program = glu.Program;
+
+var shader = "#ifdef VERT\n\nattribute vec2 position;\nattribute vec2 texCoord;\nuniform vec2 screenSize;\nuniform vec2 pixelPosition;\nuniform vec2 pixelSize;\nvarying vec2 tc;\n\nvoid main() {\n  float tx = position.x * 0.5 + 0.5; //-1 -> 0, 1 -> 1\n  float ty = -position.y * 0.5 + 0.5; //-1 -> 1, 1 -> 0\n  //(x + 0)/sw * 2 - 1, (x + w)/sw * 2 - 1\n  float x = (pixelPosition.x + pixelSize.x * tx)/screenSize.x * 2.0 - 1.0;  //0 -> -1, 1 -> 1\n  //1.0 - (y + h)/sh * 2, 1.0 - (y + h)/sh * 2\n  float y = 1.0 - (pixelPosition.y + pixelSize.y * ty)/screenSize.y * 2.0;  //0 -> 1, 1 -> -1\n  gl_Position = vec4(x, y, 0.0, 1.0);\n  tc = texCoord ;\n}\n\n#endif\n\n#ifdef FRAG\n\nuniform sampler2D Backbuffer;\nuniform sampler2D Obstacle;\nuniform sampler2D Velocity;\n\nuniform float Width;\nuniform float Height;\nuniform float TimeStep;\nuniform float Dissipation;\nuniform float InverseCellSize;\nuniform vec2 Scale;\nvarying vec2 tc;\n\nvoid main(){\n  vec2 texelSize = vec2(Width, Height);\n  vec2 tcs = tc * texelSize;\n  vec2 tc2 = tc * Scale;\n\n  float xc = texture2D(Obstacle, tc2).x;\n\n  float inverseSolid = 1.0 - ceil(xc - 0.5);\n\n  vec2 u = texture2D(Velocity, tc2).rg / Scale;\n  vec2 coord =  tcs - TimeStep * InverseCellSize * u;\n  coord /= texelSize;\n\n  gl_FragColor = Dissipation * texture2D(Backbuffer, coord) * inverseSolid;\n\n}\n\n#endif\n";
+var Vec2 = require('pex-geom').Vec2;
+
+function AdvectShader (width, height) {
+  this.width = width || 512;
+  this.height = height || 512;
+  this._program = new Program(shader);
+}
+
+AdvectShader.prototype.update = function (options) {
+  var destBuffer = options.destBuffer
+    , backBufferTex = options.backBufferTex
+    , velocityTex = options.velocityTex
+    , obstacleTex = options.obstacleTex
+    , timeStep = options.timeStep
+    , dissipation = options.dissipation
+    , cellSize = options.cellSize
+    , frameRenderer = options.frameRenderer
+    , type = options.type || 'nope';
+
+  if (!destBuffer) throw new Error("no destBuffer");
+  if (!backBufferTex) throw new Error("no backBufferTex");
+  if (!velocityTex) throw new Error("no velocityTex");
+  if (!obstacleTex) throw new Error("no obstacleTex");
+  if (!timeStep) console.log("no timestep");
+  if (!dissipation) throw new Error("no dissipation");
+  if (!cellSize) throw new Error("no cellSize");
+  if (!frameRenderer) throw new Error("no frameRenderer");
+
+  destBuffer.bind();
+  this._program.use();
+  //vert
+  this._program.uniforms.screenSize(new Vec2(this.width, this.height));
+  this._program.uniforms.pixelPosition(new Vec2(0, 0));
+  this._program.uniforms.pixelSize(new Vec2(this.width, this.height));
+  //frag
+  backBufferTex.bind(0);
+  this._program.uniforms.Backbuffer(0);
+  velocityTex.bind(1);
+  this._program.uniforms.Velocity(1);
+  obstacleTex.bind(2);
+  this._program.uniforms.Obstacle(2);
+  this._program.uniforms.Width(this.width);
+  this._program.uniforms.Height(this.height);
+  this._program.uniforms.TimeStep(timeStep);
+  this._program.uniforms.Dissipation(dissipation);
+  this._program.uniforms.InverseCellSize(1.0 / cellSize);
+  var scale = new Vec2(velocityTex.width / destBuffer.width,
+                      velocityTex.height / destBuffer.height);
+  this._program.uniforms.Scale(scale);
+  frameRenderer.draw(this._program);
+  destBuffer.unbind();
+
+}
+
+module.exports = AdvectShader;
+
+
+},{"pex-geom":200,"pex-glu":218}],273:[function(require,module,exports){
+var glu = require('pex-glu');
+var Context = glu.Context;
+var Program = glu.Program;
+
+var shader = "#ifdef VERT\n\nattribute vec2 position;\nattribute vec2 texCoord;\nuniform vec2 screenSize;\nuniform vec2 pixelPosition;\nuniform vec2 pixelSize;\nvarying vec2 tc;\n\nvoid main() {\n  float tx = position.x * 0.5 + 0.5; //-1 -> 0, 1 -> 1\n  float ty = -position.y * 0.5 + 0.5; //-1 -> 1, 1 -> 0\n  //(x + 0)/sw * 2 - 1, (x + w)/sw * 2 - 1\n  float x = (pixelPosition.x + pixelSize.x * tx)/screenSize.x * 2.0 - 1.0;  //0 -> -1, 1 -> 1\n  //1.0 - (y + h)/sh * 2, 1.0 - (y + h)/sh * 2\n  float y = 1.0 - (pixelPosition.y + pixelSize.y * ty)/screenSize.y * 2.0;  //0 -> 1, 1 -> -1\n  gl_Position = vec4(x, y, 0.0, 1.0);\n  tc = texCoord;\n}\n\n#endif\n\n#ifdef FRAG\n\nuniform sampler2D Backbuffer;\nuniform float MaxLength;\nuniform float ClampForce;\nvarying vec2 tc;\n\nvoid main(){\n\n  vec4 color = texture2D(Backbuffer, tc);\n\n  float l = length(color.xyz);\n  if (l > MaxLength) {\n    float dinges = (l - MaxLength) * ClampForce;\n    color.xyz = normalize(color.xyz) * (l - dinges);\n  }\n  gl_FragColor = color ;\n}\n\n\n#endif\n";
+var Vec2 = require('pex-geom').Vec2;
+
+function ClampLengthShader (width, height) {
+  this.width = width || 512;
+  this.height = height || 512;
+  this._program = new Program(shader);
+}
+
+ClampLengthShader.prototype.update = function (options) {
+  var destBuffer = options.destBuffer
+    , backBufferTex = options.backBufferTex
+    , max = options.max
+    , clampForce = options.clampForce
+    , frameRenderer = options.frameRenderer;
+
+  if (!destBuffer) throw new Error("no destBuffer");
+  if (!backBufferTex) throw new Error("no backBufferTex");
+  if (!max) throw new Error("no max");
+  if (!clampForce) throw new Error("no clampForce");
+  if (!frameRenderer) throw new Error("no frameRenderer");
+
+  destBuffer.bind();
+  this._program.use();
+  //vert
+  this._program.uniforms.screenSize(new Vec2(this.width, this.height));
+  this._program.uniforms.pixelPosition(new Vec2(0, 0));
+  this._program.uniforms.pixelSize(new Vec2(this.width, this.height));
+  //frag
+  backBufferTex.bind(0);
+  this._program.uniforms.Backbuffer(0);
+  this._program.uniforms.MaxLength(max);
+  this._program.uniforms.ClampForce(clampForce);
+  frameRenderer.draw(this._program);
+  destBuffer.unbind();
+
+}
+
+module.exports = ClampLengthShader;
+
+},{"pex-geom":200,"pex-glu":218}],274:[function(require,module,exports){
+var glu = require('pex-glu');
+var Context = glu.Context;
+var Program = glu.Program;
+
+var shader  = "#ifdef VERT\n\nattribute vec2 position;\nattribute vec2 texCoord;\nuniform vec2 screenSize;\nuniform vec2 pixelPosition;\nuniform vec2 pixelSize;\nvarying vec2 tc;\n\nvoid main() {\n  float tx = position.x * 0.5 + 0.5; //-1 -> 0, 1 -> 1\n  float ty = -position.y * 0.5 + 0.5; //-1 -> 1, 1 -> 0\n  //(x + 0)/sw * 2 - 1, (x + w)/sw * 2 - 1\n  float x = (pixelPosition.x + pixelSize.x * tx)/screenSize.x * 2.0 - 1.0;  //0 -> -1, 1 -> 1\n  //1.0 - (y + h)/sh * 2, 1.0 - (y + h)/sh * 2\n  float y = 1.0 - (pixelPosition.y + pixelSize.y * ty)/screenSize.y * 2.0;  //0 -> 1, 1 -> -1\n  gl_Position = vec4(x, y, 0.0, 1.0);\n  tc = texCoord;\n}\n\n#endif\n\n#ifdef FRAG\nuniform sampler2D Velocity;\nuniform sampler2D Obstacle;\nuniform float Viscosity;\nuniform float C;\nuniform int test;\nuniform float Width;\nuniform float Height;\nvarying vec2 tc;\n\nvoid v2TexNeighbors(sampler2D tex, vec2 st,\n    out vec2 left, out vec2 right, out vec2 bottom, out vec2 top, vec2 ts) {\n  left   = texture2D(tex, st - vec2(1, 0) / ts ).xy;\n  right  = texture2D(tex, st + vec2(1, 0) / ts ).xy;\n  bottom = texture2D(tex, st - vec2(0, 1) / ts ).xy;\n  top    = texture2D(tex, st + vec2(0, 1) / ts ).xy;\n\n}\n\nvoid fRoundTexNeighbors(sampler2D tex, vec2 st,\n    out float left, out float right, out float bottom, out float top, vec2 ts) {\n  left   = ceil(texture2D(tex, st - vec2(1, 0) / ts ).x - 0.5);\n  right  = ceil(texture2D(tex, st + vec2(1, 0) / ts ).x - 0.5);\n  bottom = ceil(texture2D(tex, st - vec2(0, 1) / ts ).x - 0.5);\n  top    = ceil(texture2D(tex, st + vec2(0, 1) / ts ).x - 0.5);\n\n}\n\nvoid main(){\n\n  vec2 texelSize = vec2(Width, Height);\n\n  vec2 vL; vec2 vR; vec2 vB; vec2 vT;\n  v2TexNeighbors (Velocity, tc, vL, vR, vB, vT, texelSize);\n  vec2 vC = texture2D(Velocity, tc).xy;\n\n  float oL; float oR; float oB; float oT;\n  fRoundTexNeighbors (Obstacle, tc, oL, oR, oB, oT, texelSize);\n  float inverseSolid = 1.0 - ceil(texture2D(Obstacle, tc).x - 0.5);\n\n  vL *= 1.0 - oL;\n  vR *= 1.0 - oR;\n  vB *= 1.0 - oB;\n  vT *= 1.0 - oT;\n  // ADD NEIGHBOR OBSTACLES;\n\n  vec2 newVel = ((vC + Viscosity * (vL + vR + vB + vT)) / C) * inverseSolid;\n\n  gl_FragColor = vec4(newVel, 0.0, 0.0);\n}\n\n#endif\n\n";
+var Vec2 = require('pex-geom').Vec2;
+
+function DiffuseShader (width, height) {
+  this.width = width || 512;
+  this.height = height || 512;
+  this._program = new Program(shader);
+}
+
+DiffuseShader.prototype.update = function (options) {
+  var destBuffer = options.destBuffer
+    , backBufferTex = options.backBufferTex
+    , obstacleTex = options.obstacleTex
+    , viscosity = options.viscosity
+    , frameRenderer = options.frameRenderer;
+
+  if (!destBuffer) throw new Error("no destBuffer");
+  if (!backBufferTex) throw new Error("no backBufferTex");
+  if (!obstacleTex) throw new Error("no obstacleTex");
+  //if (!viscosity) throw new Error("no viscosity");
+  if (!frameRenderer) throw new Error("no frameRenderer");
+
+  destBuffer.bind();
+  this._program.use();
+  //vert
+  this._program.uniforms.screenSize(new Vec2(this.width, this.height));
+  this._program.uniforms.pixelPosition(new Vec2(0, 0));
+  this._program.uniforms.pixelSize(new Vec2(this.width, this.height));
+  //frag
+  backBufferTex.bind(0);
+  this._program.uniforms.Velocity(0);
+  obstacleTex.bind(1);
+  this._program.uniforms.Obstacle(1);
+  this._program.uniforms.Width(this.width);
+  this._program.uniforms.Height(this.height);
+  this._program.uniforms.Viscosity(viscosity);
+  this._program.uniforms.C(1 + 4 * viscosity);
+  frameRenderer.draw(this._program);
+  destBuffer.unbind();
+
+}
+
+module.exports = DiffuseShader;
+
+
+
+},{"pex-geom":200,"pex-glu":218}],275:[function(require,module,exports){
+var glu = require('pex-glu');
+var Context = glu.Context;
+var Program = glu.Program;
+
+var shader  = "#ifdef VERT\n\nattribute vec2 position;\nattribute vec2 texCoord;\nuniform vec2 screenSize;\nuniform vec2 pixelPosition;\nuniform vec2 pixelSize;\nvarying vec2 tc;\n\nvoid main() {\n  float tx = position.x * 0.5 + 0.5; //-1 -> 0, 1 -> 1\n  float ty = -position.y * 0.5 + 0.5; //-1 -> 1, 1 -> 0\n  //(x + 0)/sw * 2 - 1, (x + w)/sw * 2 - 1\n  float x = (pixelPosition.x + pixelSize.x * tx)/screenSize.x * 2.0 - 1.0;  //0 -> -1, 1 -> 1\n  //1.0 - (y + h)/sh * 2, 1.0 - (y + h)/sh * 2\n  float y = 1.0 - (pixelPosition.y + pixelSize.y * ty)/screenSize.y * 2.0;  //0 -> 1, 1 -> -1\n  gl_Position = vec4(x, y, 0.0, 1.0);\n  tc = texCoord;\n}\n\n#endif\n\n#ifdef FRAG\n\nuniform sampler2D Velocity;\nuniform sampler2D Obstacle;\nuniform float HalfInverseCellSize;\nuniform float Width;\nuniform float Height;\nvarying vec2 tc;\n\nvoid v2TexNeighbors(sampler2D tex, vec2 st,\n    out vec2 left, out vec2 right, out vec2 bottom, out vec2 top, vec2 ts) {\n  left   = texture2D(tex, st - vec2(1, 0) / ts ).xy;\n  right  = texture2D(tex, st + vec2(1, 0) / ts ).xy;\n  bottom = texture2D(tex, st - vec2(0, 1) / ts ).xy;\n  top    = texture2D(tex, st + vec2(0, 1) / ts ).xy;\n}\n\nvoid fRoundTexNeighbors(sampler2D tex, vec2 st,\n    out float left, out float right, out float bottom, out float top, vec2 ts) {\n  left   = ceil(texture2D(tex, st - vec2(1, 0) / ts ).x - 0.5);\n  right  = ceil(texture2D(tex, st + vec2(1, 0) / ts ).x - 0.5);\n  bottom = ceil(texture2D(tex, st - vec2(0, 1) / ts ).x - 0.5);\n  top    = ceil(texture2D(tex, st + vec2(0, 1) / ts ).x - 0.5);\n}\n\nvoid main(){\n\n  vec2 texelSize = vec2(Width, Height);\n\n  vec2 vL; vec2 vR; vec2 vB; vec2 vT;\n  v2TexNeighbors (Velocity, tc, vL, vR, vB, vT, texelSize);\n  float oL; float oR; float oB; float oT;\n  fRoundTexNeighbors (Obstacle, tc, oL, oR, oB, oT, texelSize);\n\n  vL *= 1.0 - oL;\n  vR *= 1.0 - oR;\n  vB *= 1.0 - oB;\n  vT *= 1.0 - oT;\n\n  gl_FragColor.r = HalfInverseCellSize * (vR.x - vL.x + vT.y - vB.y);\n\n}\n\n#endif\n\n\n";
+var Vec2 = require('pex-geom').Vec2;
+
+function DivergenceShader (width, height) {
+  this.width = width || 512;
+  this.height = height || 512;
+  this._program = new Program(shader);
+}
+
+DivergenceShader.prototype.update = function (options) {
+  var destBuffer = options.destBuffer
+    , velocityTex = options.velocityTex
+    , obstacleTex = options.obstacleTex
+    , cellSize = options.cellSize
+    , frameRenderer = options.frameRenderer;
+
+  if (!destBuffer) throw new Error("no destBuffer");
+  if (!velocityTex) throw new Error("no velocityTex");
+  if (!obstacleTex) throw new Error("no obstacleTex");
+  if (!cellSize) throw new Error("no cellSize");
+  if (!frameRenderer) throw new Error("no frameRenderer");
+
+  destBuffer.bind();
+  this._program.use();
+  //vert
+  this._program.uniforms.screenSize(new Vec2(this.width, this.height));
+  this._program.uniforms.pixelPosition(new Vec2(0, 0));
+  this._program.uniforms.pixelSize(new Vec2(this.width, this.height));
+  //frag
+  velocityTex.bind(0);
+  this._program.uniforms.Velocity(0);
+  obstacleTex.bind(1);
+  this._program.uniforms.Obstacle(1);
+  this._program.uniforms.Width(this.width);
+  this._program.uniforms.Height(this.height);
+  this._program.uniforms.HalfInverseCellSize(0.5 / cellSize);
+  frameRenderer.draw(this._program);
+  destBuffer.unbind();
+
+}
+
+module.exports = DivergenceShader;
+
+},{"pex-geom":200,"pex-glu":218}],276:[function(require,module,exports){
+var glu = require('pex-glu');
+var Context = glu.Context;
+var Program = glu.Program;
+
+var shader  = "#ifdef VERT\n\nattribute vec2 position;\nattribute vec2 texCoord;\nuniform vec2 screenSize;\nuniform vec2 pixelPosition;\nuniform vec2 pixelSize;\nvarying vec2 tc;\n\nvoid main() {\n  float tx = position.x * 0.5 + 0.5; //-1 -> 0, 1 -> 1\n  float ty = -position.y * 0.5 + 0.5; //-1 -> 1, 1 -> 0\n  //(x + 0)/sw * 2 - 1, (x + w)/sw * 2 - 1\n  float x = (pixelPosition.x + pixelSize.x * tx)/screenSize.x * 2.0 - 1.0;  //0 -> -1, 1 -> 1\n  //1.0 - (y + h)/sh * 2, 1.0 - (y + h)/sh * 2\n  float y = 1.0 - (pixelPosition.y + pixelSize.y * ty)/screenSize.y * 2.0;  //0 -> 1, 1 -> -1\n  gl_Position = vec4(x, y, 0.0, 1.0);\n  tc = texCoord;\n}\n\n#endif\n\n#ifdef FRAG\n\nuniform sampler2D Pressure;\nuniform sampler2D Divergence;\nuniform sampler2D Obstacle;\nuniform float Alpha;\nuniform float Width;\nuniform float Height;\nvarying vec2 tc;\n//\t   uniform float InverseBeta = 0.25;\n\nvoid fTexNeighbors(sampler2D tex, vec2 st,\n    out float left, out float right, out float bottom, out float top, vec2 ts) {\n  //float texelSize = 1.0 / 512.0;\n  left   = texture2D(tex, st - vec2(1, 0) / ts ).x;\n  right  = texture2D(tex, st + vec2(1, 0) / ts ).x;\n  bottom = texture2D(tex, st - vec2(0, 1) / ts ).x;\n  top    = texture2D(tex, st + vec2(0, 1) / ts ).x;\n}\n\nvoid fRoundTexNeighbors(sampler2D tex, vec2 st,\n    out float left, out float right, out float bottom, out float top, vec2 ts) {\n  //float texelSize = 1.0 / 512.0;\n  left   = ceil(texture2D(tex, st - vec2(1, 0) / ts ).x - 0.5);\n  right  = ceil(texture2D(tex, st + vec2(1, 0) / ts ).x - 0.5);\n  bottom = ceil(texture2D(tex, st - vec2(0, 1) / ts ).x - 0.5);\n  top    = ceil(texture2D(tex, st + vec2(0, 1) / ts ).x - 0.5);\n}\n\nvoid main() {\n\n  vec2 texelSize = vec2(Width, Height);\n\n  float pL; float pR; float pB; float pT;\n  fTexNeighbors (Pressure, tc, pL, pR, pB, pT, texelSize);\n  float pC = texture2D(Pressure, tc).x;\n\n  float oL; float oR; float oB; float oT;\n  fRoundTexNeighbors (Obstacle, tc, oL, oR, oB, oT, texelSize);\n\n  float bC = texture2D(Divergence, tc ).x;\n\n  pL = pL * (1.0 - oL) + pC * oL;\n  pR = pR * (1.0 - oR) + pC * oR;\n  pB = pB * (1.0 - oB) + pC * oB;\n  pT = pT * (1.0 - oT) + pC * oT;\n\n\n  gl_FragColor = vec4((pL + pR + pB + pT + Alpha * bC) * 0.25, 0.0,0.0,0.0);\n}\n\n#endif\n\n\n\n";
+var Vec2 = require('pex-geom').Vec2;
+
+function JacobiShader (width, height) {
+  this.width = width || 512;
+  this.height = height || 512;
+  this._program = new Program(shader);
+}
+
+JacobiShader.prototype.update = function (options) {
+  var destBuffer = options.destBuffer
+    , backBufferTex = options.backBufferTex
+    , obstacleTex = options.obstacleTex
+    , divergenceTex = options.divergenceTex
+    , cellSize = options.cellSize
+    , frameRenderer = options.frameRenderer;
+
+  if (!destBuffer) throw new Error("no destBuffer");
+  if (!backBufferTex) throw new Error("no backBufferTex");
+  if (!obstacleTex) throw new Error("no obstacleTex");
+  if (!divergenceTex) throw new Error("no divergenceTex");
+  if (!frameRenderer) throw new Error("no frameRenderer");
+
+  destBuffer.bind();
+  this._program.use();
+  //vert
+  this._program.uniforms.screenSize(new Vec2(this.width, this.height));
+  this._program.uniforms.pixelPosition(new Vec2(0, 0));
+  this._program.uniforms.pixelSize(new Vec2(this.width, this.height));
+  //frag
+  backBufferTex.bind(0);
+  this._program.uniforms.Pressure(0);
+  divergenceTex.bind(1);
+  this._program.uniforms.Divergence(1);
+  obstacleTex.bind(2);
+  this._program.uniforms.Obstacle(2);
+  this._program.uniforms.Width(this.width);
+  this._program.uniforms.Height(this.height);
+  this._program.uniforms.Alpha(-cellSize * cellSize);
+  frameRenderer.draw(this._program);
+  destBuffer.unbind();
+
+}
+
+module.exports = JacobiShader;
+
+
+},{"pex-geom":200,"pex-glu":218}],277:[function(require,module,exports){
+var glu = require('pex-glu');
+var Context = glu.Context;
+var Program = glu.Program;
+
+var shader = "#ifdef VERT\n\nattribute vec2 position;\nattribute vec2 texCoord;\nuniform vec2 screenSize;\nuniform vec2 pixelPosition;\nuniform vec2 pixelSize;\nvarying vec2 tc;\n\nvoid main() {\n  float tx = position.x * 0.5 + 0.5; //-1 -> 0, 1 -> 1\n  float ty = -position.y * 0.5 + 0.5; //-1 -> 1, 1 -> 0\n  //(x + 0)/sw * 2 - 1, (x + w)/sw * 2 - 1\n  float x = (pixelPosition.x + pixelSize.x * tx)/screenSize.x * 2.0 - 1.0;  //0 -> -1, 1 -> 1\n  //1.0 - (y + h)/sh * 2, 1.0 - (y + h)/sh * 2\n  float y = 1.0 - (pixelPosition.y + pixelSize.y * ty)/screenSize.y * 2.0;  //0 -> 1, 1 -> -1\n  gl_Position = vec4(x, y, 0.0, 1.0);\n  tc = texCoord;\n}\n\n#endif\n\n#ifdef FRAG\n\nuniform sampler2D Velocity;\nuniform sampler2D Pressure;\nuniform sampler2D Obstacle;\nuniform float Width;\nuniform float Height;\nuniform float HalfInverseCellSize;\nvarying vec2 tc;\n\nvoid fTexNeighbors(sampler2D tex, vec2 st,\n    out float left, out float right, out float bottom, out float top, vec2 ts) {\n  float texelSize = 1.0 / 512.0;\n  left   = texture2D(tex, st - vec2(1, 0) / ts ).x;\n  right  = texture2D(tex, st + vec2(1, 0) / ts ).x;\n  bottom = texture2D(tex, st - vec2(0, 1) / ts ).x;\n  top    = texture2D(tex, st + vec2(0, 1) / ts ).x;\n}\n\nvoid main(){\n\n  vec2 texelSize = vec2(Width, Height);\n\n  float pL; float pR; float pB; float pT;\n  fTexNeighbors (Pressure, tc, pL, pR, pB, pT, texelSize);\n  float pC = texture2D(Pressure, tc).x;\n\n  float oL; float oR; float oB; float oT;\n  fTexNeighbors (Obstacle, tc, oL, oR, oB, oT, texelSize);\n\n  vec2 vMask = vec2(1.0,1.0);\n\n  if (oL > 0.9) { pL = pC; vMask.x = 0.0; }\n  if (oR > 0.9) { pR = pC; vMask.x = 0.0; }\n  if (oB > 0.9) { pB = pC; vMask.y = 0.0; }\n  if (oT > 0.9) { pT = pC; vMask.y = 0.0; }\n\n  vec2 oldV = texture2D(Velocity, tc).xy;\n  vec2 grad = vec2(pR - pL, pT - pB) * HalfInverseCellSize;\n  vec2 newV = oldV - grad;\n\n  gl_FragColor = vec4((vMask * newV), 0.0, 0.0);\n}\n\n#endif\n\n\n\n\n";
+var Vec2 = require('pex-geom').Vec2;
+
+function SubstractGradientShader (width, height) {
+  this.width = width || 512;
+  this.height = height || 512;
+  this._program = new Program(shader);
+}
+
+SubstractGradientShader.prototype.update = function (options) {
+  var destBuffer = options.destBuffer
+    , backBufferTex = options.backBufferTex
+    , pressureTex = options.pressureTex
+    , obstacleTex = options.obstacleTex
+    , cellSize = options.cellSize
+    , frameRenderer = options.frameRenderer;
+
+  if (!destBuffer) throw new Error("no destBuffer");
+  if (!backBufferTex) throw new Error("no backBufferTex");
+  if (!pressureTex) throw new Error("no pressureTex");
+  if (!obstacleTex) throw new Error("no obstacleTex");
+  if (!cellSize) throw new Error("no cellSize");
+  if (!frameRenderer) throw new Error("no frameRenderer");
+
+  destBuffer.bind();
+  this._program.use();
+  //vert
+  this._program.uniforms.screenSize(new Vec2(this.width, this.height));
+  this._program.uniforms.pixelPosition(new Vec2(0, 0));
+  this._program.uniforms.pixelSize(new Vec2(this.width, this.height));
+  //frag
+  backBufferTex.bind(0);
+  this._program.uniforms.Velocity(0);
+  pressureTex.bind(1);
+  this._program.uniforms.Pressure(1);
+  obstacleTex.bind(2);
+  this._program.uniforms.Obstacle(2);
+  this._program.uniforms.Width(this.width);
+  this._program.uniforms.Height(this.height);
+  this._program.uniforms.HalfInverseCellSize(0.5 / cellSize);
+  frameRenderer.draw(this._program);
+  destBuffer.unbind();
+
+}
+
+module.exports = SubstractGradientShader;
+
+
+},{"pex-geom":200,"pex-glu":218}],278:[function(require,module,exports){
+//http://www.clicktorelease.com/blog/creating-spherical-environment-mapping-shader
+
+var glu = require('pex-glu');
+var color = require('pex-color');
+var Context = glu.Context;
+var Material = glu.Material;
+var Program = glu.Program;
+var Color = color.Color;
+var merge = require('merge');
+
+
+var DisplacedMatCapGLSL = "#ifdef VERT\n\nuniform mat4 projectionMatrix;\nuniform mat4 modelViewMatrix;\nuniform mat4 normalMatrix;\nuniform float time;\nuniform float pointSize;\nattribute vec3 position;\nattribute vec3 normal;\nattribute vec2 texCoord;\n\nvarying vec3 e;\nvarying vec3 n;\nvarying vec3 p;\n\nuniform sampler2D displacementMap;\nuniform float displacementHeight;\nuniform vec2 textureSize;\nuniform vec2 planeSize;\nuniform float numSteps;\n\n\nvoid main() {\n    vec3 pos = position;\n    float height = displacementHeight * texture2D(displacementMap, texCoord).r;\n\n    float heightRight =\n                  displacementHeight *\n                  texture2D(displacementMap, texCoord + vec2(2.0/textureSize.x, 0.0)).r;\n\n    float heightFront =\n                  displacementHeight *\n                  texture2D(displacementMap, texCoord + vec2(0.0, 2.0/textureSize.y)).r;\n\n    vec3 right =\n              normalize(vec3(2.0*planeSize.x/numSteps, heightRight, 0.0) -\n              vec3(0.0, height, 0.0));\n\n    vec3 front =\n              normalize(vec3(0.0, heightFront, 2.0*planeSize.y/numSteps) -\n              vec3(0.0, height, 0.0));\n\n    vec3 up = normalize(cross(right, -front));\n\n    vec3 N = up;\n\n    pos.z += height * 5.0;\n    pos.z = log2(pos.z * 50.0) / 20.0;\n    gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);\n\n    n = normalize(vec3(normalMatrix * vec4(N, 1.0)));\n    p = pos;\n}\n\n#endif\n\n#ifdef FRAG\n\nuniform float zTreshold;\nuniform sampler2D texture;\nvarying vec3 n;\nvarying vec3 p;\n\nvoid main() {\n    vec3 r = n;\n    float m = 2.0 * sqrt(r.x * r.x + r.y * r.y + (r.z + 1.0) * (r.z + 1.0));\n    vec2 N = r.xy / m + 0.5;\n    vec3 base = texture2D( texture, N ).rgb;\n\n    gl_FragColor = vec4( base, 1.0 );\n    gl_FragColor.w = p.z * p.z * 30.0;\n\n    if (p.z < zTreshold) discard;\n}\n#endif\n";
+
+function DisplacedMatCap(uniforms) {
+  this.gl = Context.currentContext;
+  var program = new Program(DisplacedMatCapGLSL);
+  var defaults = {};
+  uniforms = merge(defaults, uniforms);
+  Material.call(this, program, uniforms);
+}
+
+DisplacedMatCap.prototype = Object.create(Material.prototype);
+
+module.exports = DisplacedMatCap;
+
+},{"merge":164,"pex-color":165,"pex-glu":218}],279:[function(require,module,exports){
+arguments[4][221][0].apply(exports,arguments)
+},{"dup":221,"pex-sys":260}],280:[function(require,module,exports){
 var Context = require('./Context');
 
 function Material(program, uniforms) {

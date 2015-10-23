@@ -34,6 +34,8 @@ var Ray = geom.Ray;
 //var TileRender = require('./TileRender');
 var DPI = 1;
 
+var socket = window.socket;
+
 if (Platform.isBrowser) {
   var canvasStyle = window.getComputedStyle(document.getElementById('pex'), null);
   var height = parseInt(canvasStyle.getPropertyValue('height'));
@@ -41,6 +43,7 @@ if (Platform.isBrowser) {
 
   //var width = window.innerWidth < 768 ? window.innerWidth : 768;
   //var height = window.innerHeight < 1024 ? window.innerHeight : 1024;
+
 }
 else {
   var width = 768;
@@ -82,6 +85,7 @@ sys.Window.create({
   },
 
   init: function() {
+    this.socket = socket;
     this.planeSize = 10;
     var planeSize = this.planeSize;
     var numSteps = 600;
@@ -107,8 +111,8 @@ sys.Window.create({
 
     this.textures = [
       Texture2D.load('assets/chroma.jpg')
-    , Texture2D.load('assets/chroma2.png')
-    , Texture2D.load('assets/plastic_red.jpg')
+   // , Texture2D.load('assets/chroma2.png')
+   // , Texture2D.load('assets/plastic_red.jpg')
     ];
 
     this.mesh = new Mesh(planeTri, new DisplacedMatCap({
@@ -496,7 +500,37 @@ sys.Window.create({
      // this.lastMouse.y = mouse.y;
     }.bind(this));
 
+    this.socket.on('message', function(e){
+      console.log('message: ' + e.x, e.y);
+      if (!this.drawWithMouse) return;
+      var mouse = new Vec2();
+
+      var worldRay = this.camera.getWorldRay(e.x, e.y, this.width, this.height);
+      var planeCenter = new Vec3(0, 0, 0);
+      var planeNormal = new Vec3(0, 0, 1);
+      var hits = worldRay.hitTestPlane(planeCenter, planeNormal);
+      var hit = hits[0];
+
+      if (hit) {
+        mouse.x = ((hit.x + (this.planeSize/2)) / this.planeSize);
+        mouse.y = ((hit.y + (this.planeSize/2)) / this.planeSize);
+      }
+
+      var velocity = mouse.dup().sub(this.lastMouse);
+      var vec = new Vec3(velocity.x, velocity.y, 0);
+
+      this.drawVelocityForce.force = vec.clone();
+      this.drawVelocityForce.applyForce(mouse);
+      this.drawDensityForce.applyForce(mouse);
+
+      this.lastMouse.x = mouse.x;
+      this.lastMouse.y = mouse.y;
+    }.bind(this));
+
     this.on('mouseDragged', function(e) {
+
+      this.socket.emit('message', {x: e.x, y: e.y});
+
       if (!this.drawWithMouse) return;
       var mouse = new Vec2();
 
@@ -523,11 +557,13 @@ sys.Window.create({
 
     }.bind(this));
 
+
     this.on('keyDown', function (e) {
       if (e.str == 'x') {
         this.drawWithMouse = !this.drawWithMouse;
         this.gui.items[0].dirty = true;
       }
     }.bind(this));
+
   }
 });
