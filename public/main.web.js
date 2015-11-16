@@ -36,8 +36,6 @@ var Time = sys.Time;
 //var TileRender = require('./TileRender');
 var DPI = 1;
 
-var socket = window.socket;
-
 if (Platform.isBrowser) {
   var canvasStyle = window.getComputedStyle(document.getElementById('pex'), null);
   var height = parseInt(canvasStyle.getPropertyValue('height'));
@@ -90,7 +88,6 @@ sys.Window.create({
 
   init: function() {
     this.hint = document.getElementsByClassName('draw-hint')[0];
-    this.socket = socket;
     this.planeSize = 10;
     var planeSize = this.planeSize;
     var numSteps = 600;
@@ -531,36 +528,8 @@ sys.Window.create({
       // this.lastMouse.y = mouse.y;
     }.bind(this));
 
-    this.socket.on('message', function(e){
-      if (!this.drawWithMouse) return;
-      var mouse = new Vec2();
-
-      var worldRay = this.camera.getWorldRay(e.x, e.y, this.width, this.height);
-      var planeCenter = new Vec3(0, 0, 0);
-      var planeNormal = new Vec3(0, 0, 1);
-      var hits = worldRay.hitTestPlane(planeCenter, planeNormal);
-      var hit = hits[0];
-
-      if (hit) {
-        mouse.x = ((hit.x + (this.planeSize/2)) / this.planeSize);
-        mouse.y = ((hit.y + (this.planeSize/2)) / this.planeSize);
-      }
-
-      var velocity = mouse.dup().sub(this.lastMouse);
-      var vec = new Vec3(velocity.x, velocity.y, 0);
-
-      this.drawVelocityForce.force = vec.clone();
-      this.drawVelocityForce.applyForce(mouse);
-      this.drawDensityForce.applyForce(mouse);
-
-      this.lastMouse.x = mouse.x;
-      this.lastMouse.y = mouse.y;
-    }.bind(this));
-
     this.on('mouseDragged', function(e) {
       this.timeSinceTouch = 0;
-
-      this.socket.emit('message', {x: e.x, y: e.y});
 
       if (!this.drawWithMouse) return;
       var mouse = new Vec2();
