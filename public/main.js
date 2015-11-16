@@ -30,6 +30,7 @@ var DrawForce = require('./fluid/DrawForce');
 var ScreenImage = glu.ScreenImage;
 var Geometry = geom.Geometry;
 var Ray = geom.Ray;
+var Time = sys.Time;
 
 //var TileRender = require('./TileRender');
 var DPI = 1;
@@ -64,6 +65,7 @@ sys.Window.create({
     canvas: Platform.isBrowser ? document.getElementById('pex') : null
   },
 
+  timeSinceTouch:       0,
   started:              false,
   wireframe:            false,
   drawMetal:            true,
@@ -86,6 +88,7 @@ sys.Window.create({
   },
 
   init: function() {
+    this.hint = document.getElementsByClassName('draw-hint')[0];
     this.socket = socket;
     this.planeSize = 10;
     var planeSize = this.planeSize;
@@ -174,6 +177,9 @@ sys.Window.create({
     title.style.MozAnimation = 'fadeinout 13s';
     title.style.msAnimation = 'fadeinout 13s';
     title.style.OAnimation = 'fadeinout 13s';
+
+    this.drawPremadeTouches();
+
   },
 
   draw: function() {
@@ -181,6 +187,15 @@ sys.Window.create({
       if (this.textures[0].ready) this.start();
       return;
     }
+
+    this.timeSinceTouch += Time.delta;
+    if (this.timeSinceTouch > 20) {
+      this.hint.style.display = 'block';
+    } else {
+      this.hint.style.display = 'none';
+    }
+    //console.log(this.timeSinceTouch);
+
     try {
       glu.enableDepthReadAndWrite(true);
       if (this.needsRender) {
@@ -291,8 +306,8 @@ sys.Window.create({
       zTreshold           = this.zTreshold;
 
     this.mesh.material.uniforms.textureSize = new Vec2(this.blurredFluidTexture.width,
-                                                       this.blurredFluidTexture.height)
-    this.mesh.material.uniforms.
+        this.blurredFluidTexture.height)
+      this.mesh.material.uniforms.
       displacementMap     = this.blurredFluidTexture;
 
     this.meshWireframe.material.uniforms.
@@ -417,22 +432,22 @@ sys.Window.create({
         this.drawVelocityForce, 'edge',{min: 0, max:1});
 
 
-//    this.gui.addHeader('Dripping')
-//      .setPosition(1100, 10);
-//    this.gui.addParam('Dripping', this, 'dripping');
-//    this.gui.addParam('Drip chance', this, 'dripChance', {min: 1, max: 500});
-//    this.gui.addParam('DD Density Strength',
-//        this.drawDensityForceAuto, 'strength',{min: 0, max: 5});
-//    this.gui.addParam('DD Density Radius',
-//        this.drawDensityForceAuto, 'radius',{min: 0, max: 0.1});
-//    this.gui.addParam('DD Density Edge',
-//        this.drawDensityForceAuto, 'edge',{min: 0, max: 1});
-//    this.gui.addParam('DV Velocity Strength',
-//        this.drawVelocityForceAuto, 'strength',{min: 0, max: 5});
-//    this.gui.addParam('DV Velocity Radius',
-//        this.drawVelocityForceAuto, 'radius',{min: 0, max: 0.1});
-//    this.gui.addParam('DV Velocity Edge',
-//        this.drawVelocityForceAuto, 'edge',{min: 0, max: 1});
+    //    this.gui.addHeader('Dripping')
+    //      .setPosition(1100, 10);
+    //    this.gui.addParam('Dripping', this, 'dripping');
+    //    this.gui.addParam('Drip chance', this, 'dripChance', {min: 1, max: 500});
+    //    this.gui.addParam('DD Density Strength',
+    //        this.drawDensityForceAuto, 'strength',{min: 0, max: 5});
+    //    this.gui.addParam('DD Density Radius',
+    //        this.drawDensityForceAuto, 'radius',{min: 0, max: 0.1});
+    //    this.gui.addParam('DD Density Edge',
+    //        this.drawDensityForceAuto, 'edge',{min: 0, max: 1});
+    //    this.gui.addParam('DV Velocity Strength',
+    //        this.drawVelocityForceAuto, 'strength',{min: 0, max: 5});
+    //    this.gui.addParam('DV Velocity Radius',
+    //        this.drawVelocityForceAuto, 'radius',{min: 0, max: 0.1});
+    //    this.gui.addParam('DV Velocity Edge',
+    //        this.drawVelocityForceAuto, 'edge',{min: 0, max: 1});
 
     this.on('keyDown', function(e) {
       if (e.str == 'w') {
@@ -508,12 +523,12 @@ sys.Window.create({
     this.lastMouse = new Vec2(0, 0);
 
     this.on('mouseMoved', function (e) {
-     // if (!this.drawWithMouse) return;
-     // var mouse = new Vec2();
-     // mouse.x = e.x / this.width;
-     // mouse.y = (this.height - e.y) / this.height;
-     // this.lastMouse.x = mouse.x;
-     // this.lastMouse.y = mouse.y;
+      // if (!this.drawWithMouse) return;
+      // var mouse = new Vec2();
+      // mouse.x = e.x / this.width;
+      // mouse.y = (this.height - e.y) / this.height;
+      // this.lastMouse.x = mouse.x;
+      // this.lastMouse.y = mouse.y;
     }.bind(this));
 
     this.socket.on('message', function(e){
@@ -544,6 +559,8 @@ sys.Window.create({
     }.bind(this));
 
     this.on('mouseDragged', function(e) {
+      console.log(e.x, e.y);
+      this.timeSinceTouch = 0;
 
       this.socket.emit('message', {x: e.x, y: e.y});
 
@@ -572,6 +589,67 @@ sys.Window.create({
       this.lastMouse.y = mouse.y;
 
     }.bind(this));
+
+    this.drawPremadeTouches = function () {
+      var touchData = [
+        { x:42, y:195 },
+        { x:43, y:194 },
+        { x:43, y:192 },
+        { x:43, y:191 },
+        { x:44, y:190 },
+        { x:44, y:189 },
+        { x:44, y:188 },
+        { x:45, y:188 },
+        { x:45, y:187 },
+        { x:46, y:187 },
+        { x:46, y:186 },
+        { x:46, y:185 },
+        { x:46, y:184 },
+        { x:47, y:183 },
+        { x:48, y:182 },
+        { x:49, y:180 },
+        { x:51, y:176 },
+        { x:57, y:170 },
+        { x:62, y:162 },
+        { x:69, y:151 },
+        { x:77, y:139 },
+        { x:88, y:125 },
+        { x:97, y:113 },
+        { x:10, y:513 },
+          { x:11, y:599 },
+        { x:11, y:494 },
+        { x:11, y:790 }
+      ];
+
+      touchData.forEach(function (e) {
+
+        var mouse = new Vec2();
+
+        e.x += this.width/4;
+        e.y += this.height/4;
+
+        var worldRay = this.camera.getWorldRay(e.x, e.y, this.width, this.height);
+        var planeCenter = new Vec3(0, 0, 0);
+        var planeNormal = new Vec3(0, 0, 1);
+        var hits = worldRay.hitTestPlane(planeCenter, planeNormal);
+        var hit = hits[0];
+
+        if (hit) {
+          mouse.x = ((hit.x + (this.planeSize/2)) / this.planeSize);
+          mouse.y = ((hit.y + (this.planeSize/2)) / this.planeSize);
+        }
+
+        var velocity = mouse.dup().sub(this.lastMouse);
+        var vec = new Vec3(velocity.x, velocity.y, 0);
+
+        this.drawVelocityForce.force = vec.clone();
+        this.drawVelocityForce.applyForce(mouse);
+        this.drawDensityForce.applyForce(mouse);
+
+        this.lastMouse.x = mouse.x;
+        this.lastMouse.y = mouse.y;
+      }.bind(this));
+    }
 
 
     this.on('keyDown', function (e) {

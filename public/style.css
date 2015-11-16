@@ -348,7 +348,25 @@ ul li:hover {
   z-index: -1;
   opacity: 0;
 
+}
 
+.draw-hint {
+  position: absolute;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 35px;
+  width: 100%;
+  text-align: center;
+  pointer-events: none;
+  top: 60%;
+  display: none;
+
+  animation: blink 7s ease-in-out infinite;
+}
+
+@keyframes blink {
+  0% { color: rgba(255, 255, 255, 0.05); }
+  50% { color: rgba(255, 255, 255, 0.5); }
+  100% { color: rgba(255, 255, 255, 0.05); }
 }
 
 @keyframes fadeinout {
