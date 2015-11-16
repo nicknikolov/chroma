@@ -195,7 +195,6 @@ sys.Window.create({
     } else {
       this.hint.style.display = 'none';
     }
-    //console.log(this.timeSinceTouch);
 
     try {
       glu.enableDepthReadAndWrite(true);
@@ -533,7 +532,6 @@ sys.Window.create({
     }.bind(this));
 
     this.socket.on('message', function(e){
-      console.log('message: ' + e.x, e.y);
       if (!this.drawWithMouse) return;
       var mouse = new Vec2();
 
@@ -560,7 +558,6 @@ sys.Window.create({
     }.bind(this));
 
     this.on('mouseDragged', function(e) {
-      console.log(e.x, e.y);
       this.timeSinceTouch = 0;
 
       this.socket.emit('message', {x: e.x, y: e.y});
