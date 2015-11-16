@@ -176,7 +176,8 @@ sys.Window.create({
     title.style.msAnimation = 'fadeinout 13s';
     title.style.OAnimation = 'fadeinout 13s';
 
-    this.drawPremadeTouches();
+    //this.drawPremadeTouches();
+    this.premadeTouchCounter = 0;
 
   },
 
@@ -185,6 +186,11 @@ sys.Window.create({
       if (this.textures[0].ready) this.start();
       return;
     }
+
+    this.drawPremadeTouches(this.premadeTouchCounter);
+    this.premadeTouchCounter++;
+    this.drawPremadeTouches(this.premadeTouchCounter);
+    this.premadeTouchCounter++;
 
     this.timeSinceTouch += Time.delta;
     if (this.timeSinceTouch > 20) {
@@ -557,7 +563,7 @@ sys.Window.create({
 
     }.bind(this));
 
-    this.drawPremadeTouches = function () {
+    this.drawPremadeTouches = function (i) {
       var touchData = [
         { x:42, y:195 },
         { x:43, y:194 },
@@ -582,14 +588,16 @@ sys.Window.create({
         { x:77, y:139 },
         { x:88, y:125 },
         { x:97, y:113 },
-        { x:10, y:513 },
-          { x:11, y:599 },
-        { x:11, y:494 },
-        { x:11, y:790 }
+        { x:100, y:113 },
+        { x:115, y:99 },
+        { x:117, y:94 },
+        { x:119, y:90 }
       ];
 
-      touchData.forEach(function (e) {
+      //for (var i=0; i<touchData.length; i++) {
 
+        if (i>=touchData.length) return;
+        var e = touchData[i];
         var mouse = new Vec2();
 
         e.x += this.width/4;
@@ -615,7 +623,36 @@ sys.Window.create({
 
         this.lastMouse.x = mouse.x;
         this.lastMouse.y = mouse.y;
-      }.bind(this));
+      //}
+
+     // touchData.forEach(function (e) {
+
+     //   var mouse = new Vec2();
+
+     //   e.x += this.width/4;
+     //   e.y += this.height/4;
+
+     //   var worldRay = this.camera.getWorldRay(e.x, e.y, this.width, this.height);
+     //   var planeCenter = new Vec3(0, 0, 0);
+     //   var planeNormal = new Vec3(0, 0, 1);
+     //   var hits = worldRay.hitTestPlane(planeCenter, planeNormal);
+     //   var hit = hits[0];
+
+     //   if (hit) {
+     //     mouse.x = ((hit.x + (this.planeSize/2)) / this.planeSize);
+     //     mouse.y = ((hit.y + (this.planeSize/2)) / this.planeSize);
+     //   }
+
+     //   var velocity = mouse.dup().sub(this.lastMouse);
+     //   var vec = new Vec3(velocity.x, velocity.y, 0);
+
+     //   this.drawVelocityForce.force = vec.clone();
+     //   this.drawVelocityForce.applyForce(mouse);
+     //   this.drawDensityForce.applyForce(mouse);
+
+     //   this.lastMouse.x = mouse.x;
+     //   this.lastMouse.y = mouse.y;
+     // }.bind(this));
     }
 
 
