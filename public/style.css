@@ -346,15 +346,9 @@ ul li:hover {
   width: 100%;
   pointer-events: none;
   z-index: -1;
+  opacity: 0;
 
-  -webkit-animation: fadeinout 13s; /* Safari, Chrome and Opera > 12.1 */
-  -moz-animation: fadeinout 13s; /* Firefox < 16 */
-  -ms-animation: fadeinout 13s; /* Internet Explorer */
-  -o-animation: fadeinout 13s; /* Opera < 12.1 */
-  animation: fadeinout 13s;
 
-  -webkit-animation-delay: 3s; /* Chrome, Safari, Opera */
-  animation-delay: 3s;
 }
 
 @keyframes fadeinout {

@@ -65,6 +65,7 @@ sys.Window.create({
     canvas: Platform.isBrowser ? document.getElementById('pex') : null
   },
 
+  started:              false,
   wireframe:            false,
   drawMetal:            true,
   drawFluid:            false,
@@ -165,7 +166,22 @@ sys.Window.create({
     this.setupGui();
 
   },
+
+  start: function () {
+    this.started = true;
+    var title = document.getElementsByClassName('cinematic-title')[0];
+    title.style.animation = 'fadeinout 13s';
+    title.style.webkitAnimation = 'fadeinout 13s';
+    title.style.MozAnimation = 'fadeinout 13s';
+    title.style.msAnimation = 'fadeinout 13s';
+    title.style.OAnimation = 'fadeinout 13s';
+  },
+
   draw: function() {
+    if (!this.started) {
+      if (this.textures[0].ready) this.start();
+      return;
+    }
     try {
       glu.enableDepthReadAndWrite(true);
       if (this.needsRender) {
