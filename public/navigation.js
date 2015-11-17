@@ -16,12 +16,14 @@
   campgainWrapper.style.display = 'none'
   var aboutWrapper = document.querySelectorAll('.about')[0]
   aboutWrapper.style.display = 'none'
+  var creditsWrapper = document.querySelectorAll('.credits')[0]
+  creditsWrapper.style.display = 'none'
 
   var wrappers = {
     'nav-collection': collectionWrapper,
     'nav-campaign': campgainWrapper,
-    'nav-about': aboutWrapper
-    //'nav-credits': creditsWrapper,
+    'nav-about': aboutWrapper,
+    'nav-credits': creditsWrapper
   }
 
   for(var i=0; i<navItems.length; i++) {
@@ -54,6 +56,7 @@
     } else {
       //collectionWrapper.style.display = 'none'
       //campgainWrapper.style.display = 'none'
+      aboutWrapper.style.display = 'none'
       hamburger.classList.add('open')
       navWrapper.style.display = 'block'
     }
