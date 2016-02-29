@@ -1,3 +1,4 @@
+![chroma](http://chromaproject.co/assets/images/campaign/chroma14.jpg)
 # chroma
 
 Chroma is a generative fashion design project which was presented as the diploma collection by [Ellen Nevrokopska](http://ellennevro.tumblr.com/) in her undergraduate degree. It was inspired by fluid metallic patterns and colors. The concept was to create an app that can be used to interactively create such patters and then be printed onto the clothes.
