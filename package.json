@@ -21,7 +21,6 @@
     "vinyl-source-stream": "^1.0.0"
   },
   "scripts": {
-    "watch": "./lib/watchscript.js",
     "start": "budo index.js:bundle.js --live -- -t [ brfs --global=true] -i plask ",
     "build": "browserify -t [ brfs --global=true ] -i plask index.js > bundle.js"
   },
