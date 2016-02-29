@@ -3,8 +3,5 @@ node_modules
 [._]*.s[a-w][a-z]
 [._]s[a-w][a-z]
 *.un~
-Session.vim
-.netrwhist
 *~
-.tern-project
-main.web.js
+bundle.js
