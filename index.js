@@ -180,6 +180,7 @@ sys.Window.create({
 
   draw: function() {
     if (!this.started) {
+      document.getElementById('loader').style.display = 'none';
       if (this.textures[0].ready) this.start();
       return;
     }

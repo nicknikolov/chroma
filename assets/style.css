@@ -33,6 +33,15 @@ video {
   color: rgba(255, 255, 255, 0.8);
 }
 
+#loader {
+  width: 16px;
+  height: 16px;
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%,-50%);
+}
+
 .video-layer {
   position: absolute;
   background-color: rgba(0, 0, 0, 0.5);
